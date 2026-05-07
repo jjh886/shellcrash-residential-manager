@@ -78,13 +78,13 @@ h1 {
   gap: 12px;
   min-width: 0;
 }
-.quick-restart {
+.quick-update {
   flex: 0 0 auto;
   min-height: 34px;
   padding: 7px 10px;
-  border-color: rgba(180, 35, 24, .24);
-  background: #fff7f5;
-  color: var(--red);
+  border-color: rgba(37, 99, 235, .28);
+  background: #f3f7ff;
+  color: var(--blue);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;

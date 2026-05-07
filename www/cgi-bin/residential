@@ -111,7 +111,7 @@ save_node() {
     mv "$tmp" "$RESIDENTIAL_NODES_FILE"
     chmod 600 "$RESIDENTIAL_NODES_FILE" 2>/dev/null
     [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >"$LOG_FILE" 2>&1
-    ok "静态住宅出口已保存，重启 ShellCrash 后完全生效。"
+    ok "静态住宅出口已保存。点击顶部“更新配置”后生效。"
 }
 
 delete_node() {
@@ -122,13 +122,13 @@ delete_node() {
     [ -f "$RESIDENTIAL_NODES_FILE" ] && awk -F'|' -v id="$id" '$1 != id' "$RESIDENTIAL_NODES_FILE" > "$tmp" || : > "$tmp"
     mv "$tmp" "$RESIDENTIAL_NODES_FILE"
     [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >"$LOG_FILE" 2>&1
-    ok "静态住宅出口已删除，重启 ShellCrash 后完全生效。"
+    ok "静态住宅出口已删除。点击顶部“更新配置”后生效。"
 }
 
 apply_nodes() {
     [ -x "$SETUP_SCRIPT" ] || fail "没有找到配置生成脚本。"
     SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >"$LOG_FILE" 2>&1
-    ok "静态住宅出口配置已重新生成，重启 ShellCrash 后完全生效。"
+    ok "静态住宅出口配置已重新生成。点击顶部“更新配置”后生效。"
 }
 
 action=$(one_line "$(param action)")

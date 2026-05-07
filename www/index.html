@@ -14,7 +14,7 @@
         <div class="sub" id="pathLine">正在读取路由器状态</div>
       </div>
       <div class="header-actions">
-        <button class="primary quick-restart" data-action="restart">重启 ShellCrash</button>
+        <button class="quick-update" data-action="hotupdate">更新配置</button>
         <div class="status" id="statusPills"></div>
       </div>
     </div>
@@ -148,7 +148,7 @@
           <div class="field-tip">适合 AI 或海外服务关键词，命中后会强制走“静态住宅IP”分组。</div>
         </div>
       </div>
-      <div class="note">这里是少量手动补丁，不会再生成大段默认规则；留空时完全交给订阅和 ShellCrash 原规则。</div>
+      <div class="note">这里是少量手动补丁，不会再生成大段默认规则；保存后点击顶部“更新配置”才会真正生效。</div>
     </section>
   </main>
 
@@ -186,7 +186,7 @@
         <div class="check-grid">
           <label><input id="resEnabled" type="checkbox"> 启用这个出口</label>
         </div>
-        <div class="full field-tip">保存后会出现在 ShellCrash 面板的“静态住宅IP”分组里；选择“不使用静态住宅IP”时，请求会停在前置订阅节点或自建节点上。</div>
+        <div class="full field-tip">保存后会出现在 ShellCrash 面板的“静态住宅IP”分组里；点击顶部“更新配置”后生效。</div>
       </div>
     </section>
 
@@ -196,6 +196,7 @@
         <button data-res-action="apply">重新生成静态住宅配置</button>
       </div>
       <div class="node-list" id="resList"></div>
+      <div class="note">新增、编辑、删除出口后，请点击顶部“更新配置”，不用重启 ShellCrash。</div>
     </section>
   </main>
 
@@ -269,7 +270,7 @@
           <label><input id="nodeUseResidential" type="checkbox"> ISP 作为最终出口</label>
         </div>
       </div>
-      <div class="note">勾选后，这个节点会出现在“静态住宅IP”分组里，表示它自己就是最终出口；不勾选时，它只作为“自建节点”里的前置节点，后面还会继续走“静态住宅IP”当前选中的出口。</div>
+      <div class="note">勾选后，这个节点会出现在“静态住宅IP”分组里，表示它自己就是最终出口；不勾选时，它只作为前置节点。保存后点击顶部“更新配置”才会生效。</div>
     </section>
 
     <section>
@@ -278,6 +279,7 @@
         <button data-node-action="apply">重新生成配置</button>
       </div>
       <div class="node-list" id="nodeList"></div>
+      <div class="note">新增、编辑、删除自建节点后，请点击顶部“更新配置”，不用重启 ShellCrash。</div>
       <div class="note"><a href="https://github.com/jjh886/shellcrash-residential-manager/blob/main/SERVER_NODE_INSTALL.md" target="_blank" rel="noreferrer">服务器节点安装教程</a></div>
     </section>
   </main>

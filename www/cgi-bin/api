@@ -326,7 +326,7 @@ save_config() {
     if [ "$scope" = "rules" ]; then
         write_rules_file "$direct_domains" "$proxy_domains" "$direct_keywords" "$proxy_keywords"
         [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
-        ok "分流网站已保存。重启或热更新后完全生效。"
+        ok "分流网站已保存。点击顶部“更新配置”后生效。"
     fi
 
     [ -n "$subscription" ] && {
@@ -340,7 +340,7 @@ save_config() {
     if [ "$(param apply_guard)" = "1" ] && [ -x "$LEAK_GUARD" ]; then
         "$LEAK_GUARD" >/dev/null 2>&1
     fi
-    ok "已保存。建议点击“更新订阅”或“重启 ShellCrash”让配置立即生效。"
+    ok "已保存。点击顶部“更新配置”后生效。"
 }
 get_subscription() {
     local sub sub_j

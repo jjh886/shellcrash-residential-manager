@@ -280,6 +280,7 @@ run_builtin() {
         hotupdate) ( "$BASE/task/task.sh" hotupdate >"$LOG_FILE" 2>&1 ) & ;;
         *) fail "未知内置命令。" ;;
     esac
+    [ "$cmd" = "hotupdate" ] && ok "配置更新已开始，稍等几秒后生效。"
     ok "命令已开始执行，可查看高级日志。"
 }
 

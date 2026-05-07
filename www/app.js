@@ -340,6 +340,8 @@ async function run(action) {
     } else if (action === 'refreshPanel') {
       setPanelFrame(panelUrl);
       data = { ok: true, message: '面板已刷新' };
+    } else if (action === 'hotupdate') {
+      data = await advancedRequest('run_builtin', { cmd: 'hotupdate' });
     } else if (action === 'test') {
       data = await testExit(false);
     } else {
