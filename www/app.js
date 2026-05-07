@@ -43,8 +43,6 @@ function pill(text, kind) {
 function renderStatus(data) {
   $('pathLine').textContent = `目录：${data.crashDir || '--'} ｜ 管理页：${data.uiUrl}`;
   $('installDir').value = data.crashDir || $('installDir').value;
-  $('server').value = data.residential?.server || '';
-  $('port').value = data.residential?.port || '';
   $('directDomains').value = data.rules?.directDomains || '';
   $('proxyDomains').value = data.rules?.proxyDomains || '';
   $('directKeywords').value = data.rules?.directKeywords || '';
@@ -56,10 +54,10 @@ function renderStatus(data) {
 
   $('statusPills').innerHTML = [
     pill(data.installed ? '已安装' : '未安装', data.installed ? 'ok' : 'warn'),
-    pill(data.shellcrashRunning ? '服务运行中' : '服务未运行', data.shellcrashRunning ? 'ok' : 'bad'),
-    pill(data.subscriptionConfigured ? '订阅已配置' : '订阅未配置', data.subscriptionConfigured ? 'ok' : 'warn'),
-    pill(data.guardActive ? '防泄露已应用' : '防泄露未应用', data.guardActive ? 'ok' : 'warn'),
-    pill(data.residential?.passwordConfigured ? '住宅出口已配置' : '住宅出口待配置', data.residential?.passwordConfigured ? 'ok' : 'warn')
+    pill(data.shellcrashRunning ? '运行中' : '未运行', data.shellcrashRunning ? 'ok' : 'bad'),
+    pill(data.subscriptionConfigured ? '订阅正常' : '未配置订阅', data.subscriptionConfigured ? 'ok' : 'warn'),
+    pill(data.guardActive ? '防泄露开启' : '防泄露未开', data.guardActive ? 'ok' : 'warn'),
+    pill((data.residential?.count || 0) > 0 ? `住宅 ${data.residential.count}` : '住宅未配', (data.residential?.count || 0) > 0 ? 'ok' : 'warn')
   ].join('');
 }
 
@@ -320,15 +318,6 @@ async function run(action) {
         scope: 'subscription',
         subscription_url: $('subscription').value
       });
-    } else if (action === 'saveResidential') {
-      data = await request('save', {
-        scope: 'residential',
-        server: $('server').value,
-        port: $('port').value,
-        username: $('username').value,
-        password: $('password').value
-      });
-      $('password').value = '';
     } else if (action === 'saveRules') {
       data = await request('save', {
         scope: 'rules',

@@ -1,0 +1,463 @@
+#!/bin/ash
+# 这是页面调用的后端接口，负责 ShellCrash 安装、服务管理和持久化配置。
+# 订阅更新会覆盖 yamls/config.yaml，但不会覆盖这里维护的 proxies/rules 文件。
+BASE=${SHELLCRASH_HOME:-/data/other_vol/ShellCrash}
+APP_DIR=$(cd "$(dirname "$0")/../.." && pwd)
+YAML_DIR="$BASE/yamls"
+CFG_FILE="$BASE/configs/ShellCrash.cfg"
+PROXIES_FILE="$YAML_DIR/proxies.yaml"
+GROUPS_FILE="$YAML_DIR/proxy-groups.yaml"
+RULES_FILE="$YAML_DIR/rules.yaml"
+LEAK_GUARD="$BASE/task/block_proxy_leaks.sh"
+SETUP_SCRIPT="$APP_DIR/scripts/setup-shellcrash-custom.sh"
+INSTALL_SCRIPT="$APP_DIR/scripts/shellcrash-auto-install.sh"
+RULE_HELPERS="$APP_DIR/scripts/rule_helpers.sh"
+NODE_HELPERS="$APP_DIR/scripts/custom_nodes.sh"
+RES_HELPERS="$APP_DIR/scripts/residential_nodes.sh"
+GROUP_HELPERS="$APP_DIR/scripts/group_helpers.sh"
+BACKUP_DIR="$APP_DIR/backups"
+RES_GROUP="静态住宅IP"
+NO_RES_NODE="不使用静态住宅IP"
+SELF_GROUP="自建节点"
+NO_SELF_NODE="使用订阅节点"
+DIRECT_EXIT_NODE="直接使用静态住宅IP"
+[ -f "$RULE_HELPERS" ] && . "$RULE_HELPERS"
+[ -f "$NODE_HELPERS" ] && . "$NODE_HELPERS"
+[ -f "$RES_HELPERS" ] && . "$RES_HELPERS"
+[ -f "$GROUP_HELPERS" ] && . "$GROUP_HELPERS"
+PARAMS="$QUERY_STRING"
+if [ "$REQUEST_METHOD" = "POST" ] && [ "${CONTENT_LENGTH:-0}" -gt 0 ]; then
+    PARAMS="$PARAMS&$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
+fi
+send_json() {
+    printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+    printf '%s\n' "$1"
+    exit 0
+}
+json_escape() {
+    printf '%s' "$1" | awk '{
+        gsub(/\\/,"\\\\")
+        gsub(/"/,"\\\"")
+        gsub(/\t/,"\\t")
+        gsub(/\r/,"")
+        if (NR > 1) printf "\\n"
+        printf "%s", $0
+    }'
+}
+ok() {
+    local message
+    message=$(json_escape "$1")
+    send_json "{\"ok\":true,\"message\":\"$message\"}"
+}
+fail() {
+    local message
+    message=$(json_escape "$1")
+    send_json "{\"ok\":false,\"message\":\"$message\"}"
+}
+urldecode() {
+    local value
+    value=$(printf '%s' "$1" | sed 's/+/ /g; s/%/\\x/g')
+    printf '%b' "$value"
+}
+param() {
+    local key="$1"
+    local raw
+    raw=$(printf '%s' "$PARAMS" | tr '&' '\n' | sed -n "s/^$key=//p" | tail -n 1)
+    urldecode "$raw"
+}
+has_param() {
+    local key="$1"
+    printf '%s' "$PARAMS" | tr '&' '\n' | grep -q "^$key="
+}
+one_line() {
+    # 配置值只允许单行，避免把表单内容写坏成多行配置。
+    printf '%s' "$1" | tr -d '\r\n'
+}
+yaml_quote() {
+    # YAML 单引号字符串里，单引号用两个单引号表示。
+    printf '%s' "$1" | sed "s/'/''/g"
+}
+shell_quote() {
+    # Shell 单引号变量值里，单引号需要拆开再拼回去。
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+}
+backup_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    mkdir -p "$BACKUP_DIR"
+    cp "$file" "$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d-%H%M%S)" 2>/dev/null
+}
+get_proxy_field() {
+    local field="$1"
+    [ -f "$PROXIES_FILE" ] || return 0
+    case "$field" in
+        port)
+            sed -n "s/.*port: \([0-9][0-9]*\).*/\1/p" "$PROXIES_FILE" | head -n 1
+            ;;
+        *)
+            sed -n "s/.*$field: '\([^']*\)'.*/\1/p" "$PROXIES_FILE" | head -n 1
+            ;;
+    esac
+}
+mask_value() {
+    local value="$1"
+    local len=${#value}
+    [ -n "$value" ] || { echo ""; return; }
+    [ "$len" -le 6 ] && { echo "***"; return; }
+    printf '%s***%s' "$(printf '%s' "$value" | cut -c 1-2)" "$(printf '%s' "$value" | sed 's/.*\(..\)$/\1/')"
+}
+cfg_has_subscription() {
+    [ -f "$CFG_FILE" ] || return 1
+    grep -Eq "^(Https|Url)='?https?://" "$CFG_FILE"
+}
+get_cfg_value() {
+    local key="$1"
+    [ -f "$CFG_FILE" ] || return 0
+    sed -n "s/^$key='\(.*\)'$/\1/p; s/^$key=\(.*\)$/\1/p" "$CFG_FILE" | head -n 1
+}
+require_shellcrash() {
+    [ -x "$BASE/start.sh" ] && [ -x "$BASE/task/task.sh" ] && return 0
+    fail "还没有找到 ShellCrash，请先点击“安装 ShellCrash”。"
+}
+set_cfg_plain() {
+    local key="$1"
+    local value="$2"
+    local tmp="$CFG_FILE.tmp.$$"
+    local found=0
+    mkdir -p "$(dirname "$CFG_FILE")"
+    touch "$CFG_FILE"
+    while IFS= read -r line; do
+        case "$line" in
+            "$key="*)
+                echo "$key=$value"
+                found=1
+                ;;
+            *)
+                echo "$line"
+                ;;
+        esac
+    done < "$CFG_FILE" > "$tmp"
+    [ "$found" -eq 0 ] && echo "$key=$value" >> "$tmp"
+    mv "$tmp" "$CFG_FILE"
+}
+set_cfg_quoted() {
+    local key="$1"
+    local value
+    local tmp="$CFG_FILE.tmp.$$"
+    local found=0
+    value=$(shell_quote "$2")
+    mkdir -p "$(dirname "$CFG_FILE")"
+    touch "$CFG_FILE"
+    while IFS= read -r line; do
+        case "$line" in
+            "$key="*)
+                echo "$key='$value'"
+                found=1
+                ;;
+            *)
+                echo "$line"
+                ;;
+        esac
+    done < "$CFG_FILE" > "$tmp"
+    [ "$found" -eq 0 ] && echo "$key='$value'" >> "$tmp"
+    mv "$tmp" "$CFG_FILE"
+}
+ensure_shellcrash_flags() {
+    # 这些开关用于减少绕过和误代理：常用端口关闭、嗅探开启、国内 IP 直连。
+    set_cfg_plain common_ports OFF
+    set_cfg_plain sniffer ON
+    set_cfg_plain ipv6_dns OFF
+    set_cfg_plain cn_ip_route ON
+}
+write_proxy_files() {
+    local custom_nodes isp_nodes residential_nodes chain_items self_items res_items
+    chain_items=$(subscription_group_names_inline "$YAML_DIR/config.yaml")
+    custom_nodes=$(custom_node_names_inline 2>/dev/null)
+    isp_nodes=$(custom_isp_final_node_names_inline 2>/dev/null)
+    residential_nodes=$(residential_node_names_inline 2>/dev/null)
+    self_items="'$NO_SELF_NODE', '$DIRECT_EXIT_NODE'"
+    [ -n "$custom_nodes" ] && self_items="$self_items, $custom_nodes"
+    res_items="$residential_nodes"
+    [ -n "$res_items" ] && [ -n "$isp_nodes" ] && res_items="$res_items, $isp_nodes"
+    [ -z "$res_items" ] && res_items="$isp_nodes"
+    [ -n "$res_items" ] && res_items="$res_items, '$NO_RES_NODE'" || res_items="'$NO_RES_NODE'"
+    mkdir -p "$YAML_DIR"
+    ensure_residential_nodes "$PROXIES_FILE"
+    backup_file "$PROXIES_FILE"
+    backup_file "$GROUPS_FILE"
+    {
+        echo "# 静态住宅出口节点：订阅更新不会覆盖这里。"
+        emit_residential_nodes_yaml "$SELF_GROUP" 2>/dev/null
+        echo "# shellcrash-manager:custom-nodes-begin"
+        emit_custom_nodes_yaml 2>/dev/null
+        echo "# shellcrash-manager:custom-nodes-end"
+    } > "$PROXIES_FILE"
+    {
+        echo "# 静态住宅IP分组：订阅更新不会覆盖这里。"
+        echo "- { name: '$NO_SELF_NODE', type: select, hidden: true, proxies: [$chain_items] }"
+        echo "- { name: '$DIRECT_EXIT_NODE', type: select, hidden: true, proxies: [DIRECT] }"
+        echo "- { name: '$NO_RES_NODE', type: select, hidden: true, proxies: ['$SELF_GROUP'] }"
+        echo "- { name: '$SELF_GROUP', type: select, proxies: [$self_items] }"
+        echo "- { name: '$RES_GROUP', type: select, proxies: [$res_items] }"
+    } > "$GROUPS_FILE"
+    chmod 600 "$PROXIES_FILE" "$GROUPS_FILE" 2>/dev/null
+}
+write_rules_file() {
+    local direct_domains="$1"
+    local proxy_domains="$2"
+    local direct_keywords="$3"
+    local proxy_keywords="$4"
+    mkdir -p "$YAML_DIR"
+    backup_file "$RULES_FILE"
+    {
+        echo "# 少量手动分流补丁：默认留空，不接管订阅规则。"
+        echo "# shellcrash-manager:direct-domains-begin"
+        emit_domain_rules "$direct_domains" DIRECT
+        echo "# shellcrash-manager:direct-domains-end"
+        echo "# shellcrash-manager:direct-keywords-begin"
+        emit_keyword_rules "$direct_keywords" DIRECT
+        echo "# shellcrash-manager:direct-keywords-end"
+        echo "# shellcrash-manager:proxy-domains-begin"
+        emit_domain_rules "$proxy_domains" "$RES_GROUP"
+        echo "# shellcrash-manager:proxy-domains-end"
+        echo "# shellcrash-manager:proxy-keywords-begin"
+        emit_keyword_rules "$proxy_keywords" "$RES_GROUP"
+        echo "# shellcrash-manager:proxy-keywords-end"
+    } > "$RULES_FILE"
+    chmod 600 "$RULES_FILE" 2>/dev/null
+}
+rule_mode() {
+    if [ -f "$RULES_FILE" ] && grep -q "RULE-SET,cn,DIRECT" "$RULES_FILE"; then
+        echo "china_direct"
+    else
+        echo "all_residential"
+    fi
+}
+guard_active() {
+    iptables -S FORWARD 2>/dev/null | grep -q shellcrash-leak-guard
+}
+shellcrash_running() {
+    ps 2>/dev/null | grep -q '[C]rashCore'
+}
+manager_running() {
+    ps w 2>/dev/null | grep -q '[u]httpd .*shellcrash-manager/www'
+}
+
+panel_info() {
+    local raw parsed
+    PANEL_PORT=$(get_cfg_value db_port)
+    PANEL_PATH=/ui
+    [ -n "$PANEL_PORT" ] || PANEL_PORT=9999
+    raw=$(get_cfg_value hostdir | tr -d "'")
+    parsed=$(printf '%s' "$raw" | sed -n 's/.*: *\([0-9][0-9]*\)\(\/[^ ]*\).*/\1|\2/p' | head -n 1)
+    if [ -n "$parsed" ]; then
+        PANEL_PORT=$(printf '%s' "$parsed" | cut -d'|' -f1)
+        PANEL_PATH=$(printf '%s' "$parsed" | cut -d'|' -f2)
+    elif echo "$raw" | grep -q '^/'; then
+        PANEL_PATH="$raw"
+    fi
+    PANEL_URL="http://192.168.31.1:${PANEL_PORT}${PANEL_PATH}/"
+}
+status_json() {
+    local mode version panel_raw_j panel_url_j panel_path_j direct_j proxy_j direct_kw_j proxy_kw_j res_count proxy_domains proxy_keywords
+    mode=$(rule_mode)
+    version=$(get_cfg_value versionsh_l)
+    panel_info
+    panel_raw_j=$(json_escape "$(get_cfg_value hostdir)")
+    panel_url_j=$(json_escape "$PANEL_URL")
+    panel_path_j=$(json_escape "$PANEL_PATH")
+    direct_j=$(json_escape "$(extract_domains direct-domains DIRECT)")
+    proxy_domains=$(extract_domains proxy-domains "$RES_GROUP")
+    [ -n "$proxy_domains" ] || proxy_domains=$(extract_domains proxy-domains "美国静态住宅IP")
+    proxy_j=$(json_escape "$proxy_domains")
+    direct_kw_j=$(json_escape "$(extract_keywords direct-keywords DIRECT)")
+    proxy_keywords=$(extract_keywords proxy-keywords "$RES_GROUP")
+    [ -n "$proxy_keywords" ] || proxy_keywords=$(extract_keywords proxy-keywords "美国静态住宅IP")
+    proxy_kw_j=$(json_escape "$proxy_keywords")
+    shellcrash_running && running=true || running=false
+    manager_running && manager=true || manager=false
+    guard_active && guard=true || guard=false
+    cfg_has_subscription && sub=true || sub=false
+    res_count=$(awk -F'|' '$2 == "ON" {n++} END {print n+0}' "$APP_DIR/residential-nodes.db" 2>/dev/null)
+    [ -x "$BASE/start.sh" ] && installed=true || installed=false
+    send_json "{\"ok\":true,\"installed\":$installed,\"shellcrashRunning\":$running,\"managerRunning\":$manager,\"guardActive\":$guard,\"subscriptionConfigured\":$sub,\"ruleMode\":\"$mode\",\"version\":\"$version\",\"crashDir\":\"$BASE\",\"panel\":\"$panel_raw_j\",\"panelUrl\":\"$panel_url_j\",\"panelPort\":\"$PANEL_PORT\",\"panelPath\":\"$panel_path_j\",\"rules\":{\"directDomains\":\"$direct_j\",\"proxyDomains\":\"$proxy_j\",\"directKeywords\":\"$direct_kw_j\",\"proxyKeywords\":\"$proxy_kw_j\"},\"residential\":{\"count\":$res_count},\"uiUrl\":\"http://192.168.31.1:19999/\"}"
+}
+save_config() {
+    local scope subscription mode direct_domains proxy_domains direct_keywords proxy_keywords
+    scope=$(one_line "$(param scope)")
+    [ -n "$scope" ] || scope=all
+    case "$scope" in all|subscription|rules) ;; *) fail "未知保存范围。" ;; esac
+    subscription=$(one_line "$(param subscription_url)")
+    mode=$(one_line "$(param rule_mode)")
+    require_shellcrash
+    backup_file "$CFG_FILE"
+
+    if [ "$scope" = "subscription" ]; then
+        [ -n "$subscription" ] || ok "订阅链接未填写，已保留当前订阅。"
+        set_cfg_quoted Https "$subscription"
+        set_cfg_quoted Url "$subscription"
+        ok "订阅链接已保存，点击“保存并更新订阅”可立即拉取新节点。"
+    fi
+
+    if has_param direct_domains; then
+        direct_domains=$(normalize_domains "$(param direct_domains)")
+    else
+        direct_domains=$(extract_domains direct-domains DIRECT)
+    fi
+    if has_param direct_keywords; then
+        direct_keywords=$(normalize_keywords "$(param direct_keywords)")
+    else
+        direct_keywords=$(extract_keywords direct-keywords DIRECT)
+    fi
+    if has_param proxy_domains; then
+        proxy_domains=$(normalize_domains "$(param proxy_domains)")
+    else
+        proxy_domains=$(extract_domains proxy-domains "$RES_GROUP")
+        [ -n "$proxy_domains" ] || proxy_domains=$(extract_domains proxy-domains "美国静态住宅IP")
+    fi
+    if has_param proxy_keywords; then
+        proxy_keywords=$(normalize_keywords "$(param proxy_keywords)")
+    else
+        proxy_keywords=$(extract_keywords proxy-keywords "$RES_GROUP")
+        [ -n "$proxy_keywords" ] || proxy_keywords=$(extract_keywords proxy-keywords "美国静态住宅IP")
+    fi
+    [ "$mode" = "all_residential" ] || mode="china_direct"
+
+    if [ "$scope" = "rules" ]; then
+        write_rules_file "$direct_domains" "$proxy_domains" "$direct_keywords" "$proxy_keywords"
+        [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
+        ok "分流网站已保存。重启或热更新后完全生效。"
+    fi
+
+    [ -n "$subscription" ] && {
+        set_cfg_quoted Https "$subscription"
+        set_cfg_quoted Url "$subscription"
+    }
+    ensure_shellcrash_flags
+    [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
+    write_proxy_files
+    write_rules_file "$direct_domains" "$proxy_domains" "$direct_keywords" "$proxy_keywords"
+    if [ "$(param apply_guard)" = "1" ] && [ -x "$LEAK_GUARD" ]; then
+        "$LEAK_GUARD" >/dev/null 2>&1
+    fi
+    ok "已保存。建议点击“更新订阅”或“重启 ShellCrash”让配置立即生效。"
+}
+get_subscription() {
+    local sub sub_j
+    require_shellcrash
+    sub=$(get_cfg_value Https)
+    [ -n "$sub" ] || sub=$(get_cfg_value Url)
+    sub_j=$(json_escape "$sub")
+    send_json "{\"ok\":true,\"subscription\":\"$sub_j\"}"
+}
+update_subscription() {
+    local subscription
+    require_shellcrash
+    subscription=$(one_line "$(param subscription_url)")
+    if [ -n "$subscription" ]; then
+        backup_file "$CFG_FILE"
+        set_cfg_quoted Https "$subscription"
+        set_cfg_quoted Url "$subscription"
+    fi
+    [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
+    "$BASE/task/task.sh" update_config >"$APP_DIR/last-update.log" 2>&1
+    [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
+    [ -x "$LEAK_GUARD" ] && "$LEAK_GUARD" >/dev/null 2>&1
+    ok "订阅更新完成，静态住宅出口配置仍然保留。"
+}
+control_shellcrash() {
+    local op="$1"
+    require_shellcrash
+    ( "$BASE/start.sh" "$op" >"$APP_DIR/last-service.log" 2>&1 ) &
+    ok "ShellCrash 已执行 $op，请稍等后刷新状态。"
+}
+install_shellcrash() {
+    local release install_dir install_url alias
+    [ -x "$INSTALL_SCRIPT" ] || fail "安装脚本不存在，请重新安装管理器。"
+    release=$(one_line "$(param release)")
+    install_dir=$(one_line "$(param install_dir)")
+    install_url=$(one_line "$(param install_url)")
+    alias=$(one_line "$(param alias)")
+    [ -n "$release" ] || release=master
+    [ -n "$install_url" ] || install_url="https://testingcf.jsdelivr.net/gh/juewuy/ShellCrash@master"
+    [ -n "$alias" ] || alias=crash
+    (
+        SC_RELEASE="$release" \
+        SC_DIR="$install_dir" \
+        SC_URL="$install_url" \
+        SC_ALIAS="$alias" \
+        MANAGER_DIR="$APP_DIR" \
+        "$INSTALL_SCRIPT"
+    ) >"$APP_DIR/last-install.log" 2>&1 &
+    ok "已开始安装或覆盖安装 ShellCrash，日志会实时写入安装日志。"
+}
+save_panel() {
+    local panel_port panel_path ui_url panel_url panel_url_j
+    require_shellcrash
+    panel_port=$(one_line "$(param panel_port)")
+    panel_path=$(one_line "$(param panel_path)")
+    ui_url=$(one_line "$(param external_ui_url)")
+    [ -n "$panel_port" ] || panel_port=9999
+    [ -n "$panel_path" ] || panel_path=/ui
+    case "$panel_port" in
+        ''|*[!0-9]*) fail "面板端口只能填写数字，比如 9999。" ;;
+    esac
+    echo "$panel_path" | grep -Eq '^/[A-Za-z0-9_./-]*$' || fail "面板路径需要以 / 开头，比如 /ui。"
+    backup_file "$CFG_FILE"
+    set_cfg_plain db_port "$panel_port"
+    set_cfg_quoted hostdir ":$panel_port$panel_path"
+    [ -n "$ui_url" ] && set_cfg_plain external_ui_url "$ui_url"
+    panel_url="http://192.168.31.1:${panel_port}${panel_path}/"
+    panel_url_j=$(json_escape "$panel_url")
+    send_json "{\"ok\":true,\"message\":\"面板地址已保存，重启 ShellCrash 后完全生效。\",\"panelUrl\":\"$panel_url_j\"}"
+}
+apply_guard() {
+    require_shellcrash
+    [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
+    [ -x "$LEAK_GUARD" ] || fail "没有找到防泄露脚本。"
+    "$LEAK_GUARD" >"$APP_DIR/last-guard.log" 2>&1
+    ok "防泄露规则已重新应用。"
+}
+test_exit() {
+    local trace ip loc http ip_j loc_j http_j
+    trace=$(curl -k -s --max-time 18 --proxy http://127.0.0.1:7890 https://chatgpt.com/cdn-cgi/trace 2>/dev/null)
+    ip=$(printf '%s\n' "$trace" | sed -n 's/^ip=//p' | head -n 1)
+    loc=$(printf '%s\n' "$trace" | sed -n 's/^loc=//p' | head -n 1)
+    http=$(printf '%s\n' "$trace" | sed -n 's/^http=//p' | head -n 1)
+    [ -n "$ip" ] || fail "测试失败：暂时没有拿到 ChatGPT trace 结果。"
+    ip_j=$(json_escape "$ip")
+    loc_j=$(json_escape "$loc")
+    http_j=$(json_escape "$http")
+    send_json "{\"ok\":true,\"message\":\"测试完成\",\"ip\":\"$ip_j\",\"loc\":\"$loc_j\",\"http\":\"$http_j\"}"
+}
+read_log() {
+    local name file content
+    name=$(one_line "$(param name)")
+    case "$name" in
+        install) file="$APP_DIR/last-install.log" ;;
+        update) file="$APP_DIR/last-update.log" ;;
+        service) file="$APP_DIR/last-service.log" ;;
+        guard) file="$APP_DIR/last-guard.log" ;;
+        *) file="$APP_DIR/uhttpd.log" ;;
+    esac
+    content=$(tail -n 80 "$file" 2>/dev/null)
+    content=$(json_escape "$content")
+    send_json "{\"ok\":true,\"content\":\"$content\"}"
+}
+action=$(one_line "$(param action)")
+[ -n "$action" ] || action=status
+case "$action" in
+    status) status_json ;;
+    get_subscription) get_subscription ;;
+    install_shellcrash) install_shellcrash ;;
+    save) save_config ;;
+    save_panel) save_panel ;;
+    update_subscription) update_subscription ;;
+    start) control_shellcrash start ;;
+    stop) control_shellcrash stop ;;
+    restart) control_shellcrash restart ;;
+    apply_guard) apply_guard ;;
+    test_exit) test_exit ;;
+    log) read_log ;;
+    *) fail "未知操作。" ;;
+esac

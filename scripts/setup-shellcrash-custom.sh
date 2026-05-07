@@ -1,5 +1,5 @@
 #!/bin/ash
-# 作用：把住宅出口、自定义规则、防泄露脚本恢复到 ShellCrash 持久化目录。
+# 作用：把静态住宅出口、自定义规则、防泄露脚本恢复到 ShellCrash 持久化目录。
 # 这个脚本可以反复执行；已有的住宅账号密码不会被默认覆盖。
 
 BASE=${SHELLCRASH_HOME:-/data/other_vol/ShellCrash}
@@ -9,18 +9,23 @@ RULES_FILE="$YAML_DIR/rules.yaml"
 CFG_FILE="$BASE/configs/ShellCrash.cfg"
 RULE_HELPERS="$APP_DIR/scripts/rule_helpers.sh"
 NODE_HELPERS="$APP_DIR/scripts/custom_nodes.sh"
+RES_HELPERS="$APP_DIR/scripts/residential_nodes.sh"
+GROUP_HELPERS="$APP_DIR/scripts/group_helpers.sh"
 LEAK_GUARD_SRC="$APP_DIR/scripts/block_proxy_leaks.sh"
 LEAK_GUARD_DST="$BASE/task/block_proxy_leaks.sh"
 WRAPPER_DST="$BASE/task/residential_runtime_wrapper.sh"
 MODIFY_FILE="$BASE/starts/clash_modify.sh"
 BFSTART_FILE="$BASE/starts/bfstart.sh"
 AFSTART="$BASE/task/afstart"
-RES_GROUP="美国静态住宅IP"
-RES_NODE="美国静态住宅IP-出口"
-CHAIN_GROUP="♻️自动选择"
-FALLBACK_CHAIN_GROUP="🚀节点选择"
+RES_GROUP="静态住宅IP"
+NO_RES_NODE="不使用静态住宅IP"
+SELF_GROUP="自建节点"
+NO_SELF_NODE="使用订阅节点"
+DIRECT_EXIT_NODE="直接使用静态住宅IP"
 [ -f "$RULE_HELPERS" ] && . "$RULE_HELPERS"
 [ -f "$NODE_HELPERS" ] && . "$NODE_HELPERS"
+[ -f "$RES_HELPERS" ] && . "$RES_HELPERS"
+[ -f "$GROUP_HELPERS" ] && . "$GROUP_HELPERS"
 
 set_cfg_plain() {
     local key="$1"
@@ -46,42 +51,41 @@ set_cfg_plain() {
 }
 
 write_default_proxy() {
-    local server port username password chain
-    server=$(get_proxy_field server)
-    port=$(get_proxy_field port)
-    username=$(get_proxy_field username)
-    password=$(get_proxy_field password)
-    chain=$(choose_chain_group)
-    [ -n "$server" ] || server=IP
-    [ -n "$port" ] || port=443
-    [ -n "$username" ] || username=用户名
-    [ -n "$password" ] || password=密码
+    ensure_residential_nodes "$YAML_DIR/proxies.yaml"
 
     cat > "$YAML_DIR/proxies.yaml" <<EOF
-# 住宅出口节点：订阅更新不会覆盖这里。
-- { name: '$RES_NODE', type: socks5, server: '$server', port: $port, username: '$username', password: '$password', dialer-proxy: '$chain' }
+# 静态住宅出口节点：订阅更新不会覆盖这里。
+$(emit_residential_nodes_yaml "$SELF_GROUP")
 # shellcrash-manager:custom-nodes-begin
 $(emit_custom_nodes_yaml)
 # shellcrash-manager:custom-nodes-end
-# shellcrash-manager:custom-residential-begin
-$(emit_custom_residential_yaml "$server" "$port" "$username" "$password")
-# shellcrash-manager:custom-residential-end
-# shellcrash-manager:custom-targets-begin
-$(emit_custom_target_comments)
-# shellcrash-manager:custom-targets-end
 EOF
     chmod 600 "$YAML_DIR/proxies.yaml" 2>/dev/null
 }
 
 write_default_group() {
-    local custom_nodes items
+    local custom_nodes isp_nodes residential_nodes chain_items self_items res_items
     custom_nodes=$(custom_node_names_inline)
-    items="'$RES_NODE'"
-    [ -n "$custom_nodes" ] && items="$items, $custom_nodes"
-    cat > "$YAML_DIR/proxy-groups.yaml" <<EOF
-# 住宅出口分组：订阅更新不会覆盖这里。
-- { name: '$RES_GROUP', type: select, proxies: [$items] }
+    isp_nodes=$(custom_isp_final_node_names_inline)
+    residential_nodes=$(residential_node_names_inline)
+    chain_items=$(subscription_group_names_inline "$YAML_DIR/config.yaml")
+    self_items="'$NO_SELF_NODE', '$DIRECT_EXIT_NODE'"
+    [ -n "$custom_nodes" ] && self_items="$self_items, $custom_nodes"
+    res_items="$residential_nodes"
+    [ -n "$res_items" ] && [ -n "$isp_nodes" ] && res_items="$res_items, $isp_nodes"
+    [ -z "$res_items" ] && res_items="$isp_nodes"
+    [ -n "$res_items" ] && res_items="$res_items, '$NO_RES_NODE'" || res_items="'$NO_RES_NODE'"
+    {
+        # 这是“自建节点”里的订阅前置选项，隐藏成内部组，避免面板多一个可操作分组。
+        echo "- { name: '$NO_SELF_NODE', type: select, hidden: true, proxies: [$chain_items] }"
+        echo "- { name: '$DIRECT_EXIT_NODE', type: select, hidden: true, proxies: [DIRECT] }"
+        echo "- { name: '$NO_RES_NODE', type: select, hidden: true, proxies: ['$SELF_GROUP'] }"
+        echo "- { name: '$SELF_GROUP', type: select, proxies: [$self_items] }"
+        cat <<EOF
+# 静态住宅IP分组：订阅更新不会覆盖这里。
+- { name: '$RES_GROUP', type: select, proxies: [$res_items] }
 EOF
+    } > "$YAML_DIR/proxy-groups.yaml"
     chmod 600 "$YAML_DIR/proxy-groups.yaml" 2>/dev/null
 }
 
@@ -89,8 +93,10 @@ write_default_rules() {
     local direct_domains proxy_domains direct_keywords proxy_keywords
     direct_domains=$(extract_domains direct-domains DIRECT)
     proxy_domains=$(extract_domains proxy-domains "$RES_GROUP")
+    [ -n "$proxy_domains" ] || proxy_domains=$(extract_domains proxy-domains "美国静态住宅IP")
     direct_keywords=$(extract_keywords direct-keywords DIRECT)
     proxy_keywords=$(extract_keywords proxy-keywords "$RES_GROUP")
+    [ -n "$proxy_keywords" ] || proxy_keywords=$(extract_keywords proxy-keywords "美国静态住宅IP")
     [ -f "$YAML_DIR/rules.yaml" ] && cp "$YAML_DIR/rules.yaml" "$YAML_DIR/rules.yaml.bak.$(date +%Y%m%d-%H%M%S)" 2>/dev/null
     {
         echo "# 少量手动分流补丁：默认留空，不接管订阅规则。"
@@ -119,14 +125,6 @@ get_proxy_field() {
     esac
 }
 
-choose_chain_group() {
-    if grep -q "name: .*自动选择" "$YAML_DIR/config.yaml" 2>/dev/null; then
-        echo "$CHAIN_GROUP"
-    else
-        echo "$FALLBACK_CHAIN_GROUP"
-    fi
-}
-
 install_leak_guard() {
     [ -f "$LEAK_GUARD_SRC" ] || return 0
 
@@ -144,22 +142,16 @@ install_runtime_wrapper() {
     mkdir -p "$BASE/task"
     cat > "$WRAPPER_DST" <<'EOF'
 #!/bin/ash
-# 运行时住宅出口封装：只改 ShellCrash 临时配置，不改订阅原始 config.yaml。
-# 做法：保留原始分组可选节点，给规则目标额外生成“住宅封装组”。
-RES_GROUP="美国静态住宅IP"
+# 运行时静态住宅出口封装：只改 ShellCrash 临时配置，不改订阅原始 config.yaml。
+# 做法：只把原本需要代理的规则指向总出口分组，避免新增一堆可见分组。
+RES_GROUP="静态住宅IP"
+NO_SELF_NODE="使用订阅节点"
+NO_RES_NODE="不使用静态住宅IP"
+SELF_GROUP="自建节点"
+DIRECT_EXIT_NODE="直接使用静态住宅IP"
 CONFIG_FILE="$TMPDIR/config.yaml"
-PROXY_FILE="$CRASHDIR/yamls/proxies.yaml"
 
 [ -s "$CONFIG_FILE" ] || return 0
-
-server=$(sed -n "s/.*server: '\([^']*\)'.*/\1/p" "$PROXY_FILE" 2>/dev/null | head -n 1)
-port=$(sed -n "s/.*port: \([0-9][0-9]*\).*/\1/p" "$PROXY_FILE" 2>/dev/null | head -n 1)
-username=$(sed -n "s/.*username: '\([^']*\)'.*/\1/p" "$PROXY_FILE" 2>/dev/null | head -n 1)
-password=$(sed -n "s/.*password: '\([^']*\)'.*/\1/p" "$PROXY_FILE" 2>/dev/null | head -n 1)
-custom_targets=$(sed -n "/# shellcrash-manager:custom-targets-begin/,/# shellcrash-manager:custom-targets-end/p" "$PROXY_FILE" 2>/dev/null |
-    sed -n "s/^# target: '\([^']*\)'.*/\1/p" | awk 'BEGIN{sep=""} {printf "%s%s", sep, $0; sep="|"}')
-[ -n "$server" ] || return 0
-[ -n "$port" ] || port=443
 
 backup="$CONFIG_FILE.before-residential.$$"
 tmp="$CONFIG_FILE.residential.$$"
@@ -167,22 +159,24 @@ cp "$CONFIG_FILE" "$backup" 2>/dev/null || return 0
 
 awk \
     -v res="$RES_GROUP" \
-    -v server="$server" \
-    -v port="$port" \
-    -v username="$username" \
-    -v password="$password" \
-    -v custom_csv="$custom_targets" '
+    -v no_self="$NO_SELF_NODE" \
+    -v no_res="$NO_RES_NODE" \
+    -v self="$SELF_GROUP" \
+    -v direct_exit="$DIRECT_EXIT_NODE" '
     function trim(s) {
         sub(/^[[:space:]]+/, "", s)
         sub(/[[:space:]]+$/, "", s)
         return s
     }
-    function yamlq(s) {
-        gsub(/\047/, "\047\047", s)
-        return s
-    }
     function is_plain_target(t) {
         return t == "DIRECT" || t == "REJECT" || t == "REJECT-DROP" || t == "PASS"
+    }
+    function is_manager_group(t) {
+        return t == res || t == no_self || t == no_res || t == self || t == direct_exit || t == "美国静态住宅IP"
+    }
+    function yamlq(s) {
+        gsub(/\047/, "\047\047", s)
+        return "\047" s "\047"
     }
     function group_name(line, part) {
         part = line
@@ -243,23 +237,23 @@ awk \
         }
         return indent "- " quote rebuilt quote comment
     }
-    function wrap_group(t) {
-        return res "-" t
+    function rewrite_group_proxies(line, list, before, after) {
+        before = line
+        sub(/proxies:[[:space:]]*\[.*/, "", before)
+        after = line
+        sub(/^.*proxies:[[:space:]]*\[[^]]*\]/, "", after)
+        return before "proxies: [" list "]" after
     }
-    function wrap_node(t) {
-        return res "-出口-" t
-    }
-    function proxy_list(t, s, k) {
-        s = "\047" yamlq(wrap_node(t)) "\047"
-        for (k = 1; k <= custom_count; k++) {
-            if (custom_nodes[k] != "") {
-                s = s ", \047" yamlq(custom_nodes[k]) "\047"
-            }
+    function add_front_candidate(t) {
+        if (t == "" || is_plain_target(t) || is_manager_group(t) || front_seen[t]) {
+            return
         }
-        return s
+        front_seen[t] = 1
+        front_list = front_list front_sep yamlq(t)
+        front_sep = ", "
     }
     function remember_target(t) {
-        if (t == "" || is_plain_target(t) || index(t, res) == 1 || direct_only[t]) {
+        if (t == "" || is_plain_target(t) || is_manager_group(t) || direct_only[t]) {
             return
         }
         if (!targets[t]) {
@@ -269,9 +263,6 @@ awk \
     }
     {
         lines[NR] = $0
-        if (NR == 1 && custom_csv != "") {
-            custom_count = split(custom_csv, custom_nodes, "|")
-        }
         if ($0 ~ /^proxies:/) section = "proxies"
         else if ($0 ~ /^proxy-groups:/) section = "groups"
         else if ($0 ~ /^rules:/) section = "rules"
@@ -279,6 +270,7 @@ awk \
 
         if (section == "groups" && $0 ~ /^[[:space:]]*-[[:space:]]*\{?[[:space:]]*name:/ && $0 ~ /proxies:[[:space:]]*\[/) {
             name = group_name($0)
+            group_order[++group_count] = name
             list = $0
             sub(/^.*proxies:[[:space:]]*\[/, "", list)
             sub(/\].*$/, "", list)
@@ -302,35 +294,33 @@ awk \
                 remember_target(rule_target(line))
             }
         }
+        for (j = 1; j <= target_count; j++) {
+            add_front_candidate(order[j])
+        }
+        for (j = 1; j <= group_count; j++) {
+            target = group_order[j]
+            if (!direct_only[target]) add_front_candidate(target)
+        }
+        if (front_list == "") front_list = "DIRECT"
 
         section = ""
         for (i = 1; i <= NR; i++) {
             line = lines[i]
-            if (line ~ /^proxies:/) section = "proxies"
-            else if (line ~ /^proxy-groups:/) {
-                if (section == "proxies") {
-                    for (j = 1; j <= target_count; j++) {
-                        target = order[j]
-                        printf "    - { name: \047%s\047, type: socks5, server: \047%s\047, port: %s, username: \047%s\047, password: \047%s\047, dialer-proxy: \047%s\047 }\n", yamlq(wrap_node(target)), yamlq(server), port, yamlq(username), yamlq(password), yamlq(target)
-                    }
-                }
+            if (line ~ /^proxy-groups:/) {
                 section = "groups"
             } else if (line ~ /^rules:/) {
-                if (section == "groups") {
-                    for (j = 1; j <= target_count; j++) {
-                        target = order[j]
-                        printf "    - { name: \047%s\047, type: select, proxies: [%s] }\n", yamlq(wrap_group(target)), proxy_list(target)
-                    }
-                }
                 section = "rules"
             } else if (line ~ /^[A-Za-z0-9_-]+:/) {
                 section = ""
             }
 
+            if (section == "groups" && line ~ /^[[:space:]]*-[[:space:]]*\{?[[:space:]]*name:/ && group_name(line) == no_self) {
+                line = rewrite_group_proxies(line, front_list)
+            }
             if (section == "rules" && line ~ /^[[:space:]]*-[[:space:]]*/) {
                 target = rule_target(line)
                 if (targets[target]) {
-                    line = rewrite_rule(line, wrap_group(target))
+                    line = rewrite_rule(line, res)
                 }
             }
             print line

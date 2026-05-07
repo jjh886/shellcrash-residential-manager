@@ -24,6 +24,7 @@ http://192.168.31.1:19999/
 - 可以点击 `刷新资源` 重新读取系统资源。
 - 打开页面后自动检测当前海外网站看到的出口 IP、出口地区和连接协议。
 - 可以点击 `刷新出口` 重新测试出口。
+- 顶部固定区域提供 `重启 ShellCrash` 快捷按钮，改完配置后可以直接重启生效。
 - 支持查看安装日志和服务日志。
 - 支持安装、覆盖安装、启动、停止、重启 ShellCrash。
 
@@ -32,24 +33,27 @@ http://192.168.31.1:19999/
 - 页面打开后会自动加载当前订阅链接。
 - 可以单独保存订阅链接。
 - 更换 VPN 订阅时，粘贴新链接后点击 `保存并更新订阅`，会先保存新链接，再拉取新节点。
-- 住宅出口是独立板块，可以单独保存静态住宅 SOCKS5 出口。
-- 支持配置住宅出口服务器、端口、账号、密码。
-- 分流网站是独立板块，可以单独保存直连和住宅出口规则。
+- 分流网站可以单独保存直连和静态住宅出口规则。
 - 支持一行一个配置：
   - 本地直连网站后缀。
-  - 海外/住宅出口网站后缀。
+  - 海外/静态住宅出口网站后缀。
   - 本地直连关键词。
-  - 海外/住宅出口关键词。
+  - 海外/静态住宅出口关键词。
 - 网站后缀会写成 `DOMAIN-SUFFIX`，例如 `cn` 只匹配 `.cn` 域名。
-- 关键词会写成 `DOMAIN-KEYWORD`，例如 `google`、`gemini`、`openai`、`claude`、`anthropic` 可固定走住宅出口。
+- 关键词会写成 `DOMAIN-KEYWORD`，例如 `google`、`gemini`、`openai`、`claude`、`anthropic` 可固定走 `静态住宅IP` 分组。
 - 注意：关键词是包含匹配，`cn` 会命中所有域名里包含 `cn` 的请求；如果只想让 `.cn` 直连，建议填到“网站后缀”里。
-- 保存住宅出口时，账号或密码留空会保留旧值，避免误清空。
-- 住宅出口不会改写订阅原始分组和原始规则；它只在运行时给原本需要代理的分组包一层出口。
 - 手动分流网站只是少量补丁，订阅判断不准时再填写，留空时完全交给订阅原规则。
 
-### 静态出口
+### 住宅出口
 
-- 支持新增、编辑、删除多台静态出口服务器。
+- 住宅出口已经做成独立 tab，支持新增、编辑、删除多个 SOCKS5 出口。
+- 支持配置静态住宅出口名称、服务器、端口、账号、密码。
+- 保存静态住宅出口时，密码留空会保留旧值，避免误清空。
+- 静态住宅出口不会改写订阅原始分组和原始规则；它只在运行时让原本需要代理的规则进入 `静态住宅IP` 分组。
+
+### 自建节点
+
+- 支持新增、编辑、删除多台自建服务器节点。
 - 支持协议：
   - Shadowsocks。
   - Socks5。
@@ -58,12 +62,12 @@ http://192.168.31.1:19999/
   - VLESS WS TLS。
 - 每个节点可以填写地址、端口、账号、密码、加密方式、UUID、SNI、Reality 公钥、Short ID 等字段。
 - VLESS 节点会写入 `packet-encoding: xudp`，用于更好地承载 UDP 请求。
-- 不勾选“这个节点只做中转，最终走住宅出口”时，这个节点自己的 IP 就是最终出口。
-- 勾选后，会额外生成 `美国静态住宅IP-经-节点名`，适合把 VPS 当作中转，最终仍然从住宅出口访问目标网站。
-- 已启用的静态出口会出现在 `美国静态住宅IP` 分组里，后续可以在 ShellCrash 面板里像选择普通节点一样手动切换。
-- 推荐服务器安装脚本路径：`/data/other_vol/shellcrash-manager/scripts/install-reality-node.sh`。
-- 兼容旧方案的安装脚本路径：`/data/other_vol/shellcrash-manager/scripts/install-static-node.sh`。
-- 推荐脚本默认生成 VLESS Reality/XUDP 节点；旧脚本默认生成 Shadowsocks，也支持 VLESS WS TLS。
+- 勾选“ISP 作为最终出口”时，这个节点会进入 `静态住宅IP` 分组，表示它自己就是最后出口。
+- 不勾选时，这个节点只进入 `自建节点` 分组，表示它只是前置节点，后面还会继续走 `静态住宅IP` 当前选中的出口。
+- `自建节点` 分组会显示 `使用订阅节点`、`直接使用静态住宅IP` 和未勾选“ISP 作为最终出口”的自建节点。
+- `使用订阅节点` 会自动从当前订阅的规则目标和代理分组里生成候选，不再固定依赖 `🚀节点选择` 或 `♻️自动选择` 这类名字。
+- `静态住宅IP` 分组会显示 `不使用静态住宅IP`、所有已启用的静态住宅 SOCKS5 出口，以及所有勾选了“ISP 作为最终出口”的自建节点。
+- 页面提供 `服务器节点安装教程` 链接；服务器安装脚本不上传到路由器，避免把路由器恢复包变成服务器安装包。
 - 页面不会回显真实节点密码；编辑旧节点时密码留空，会继续保留原密码。
 
 ### 功能设置
@@ -130,13 +134,13 @@ http://192.168.31.1:19999/
 - 支持编辑：
   - `yamls/config.yaml`：订阅原始配置。
   - `yamls/rules.yaml`：自定义规则。
-  - `yamls/proxies.yaml`：住宅出口节点。
-  - `yamls/proxy-groups.yaml`：住宅出口分组。
+  - `yamls/proxies.yaml`：静态住宅出口节点。
+  - `yamls/proxy-groups.yaml`：静态住宅出口分组。
   - `yamls/others.yaml`：其他自定义配置。
 - 支持查看 `/tmp/ShellCrash/config.yaml`：运行时合并配置。
 - 运行时合并配置只能查看，不能保存，避免把正在生效的最终配置写坏。
 
-## 订阅更新为什么不会丢住宅出口
+## 订阅更新为什么不会丢静态住宅出口
 
 订阅更新通常会覆盖：
 
@@ -144,34 +148,38 @@ http://192.168.31.1:19999/
 /data/other_vol/ShellCrash/yamls/config.yaml
 ```
 
-住宅出口和自定义规则单独保存在：
+静态住宅出口和自定义规则单独保存在：
 
 ```text
+/data/other_vol/shellcrash-manager/residential-nodes.db
 /data/other_vol/ShellCrash/yamls/proxies.yaml
 /data/other_vol/ShellCrash/yamls/proxy-groups.yaml
 /data/other_vol/ShellCrash/yamls/rules.yaml
 ```
 
-所以更新订阅时只更新订阅节点，住宅出口、分流规则和防泄露设置会继续保留。
+所以更新订阅时只更新订阅节点，静态住宅出口、分流规则和防泄露设置会继续保留。
 
-住宅出口的实际生效方式是运行时封装：
+静态住宅出口的实际生效方式是运行时封装：
 
 ```text
 原始规则判断需要代理
-→ 对应的住宅封装组
-→ 原始订阅分组里当前选择的节点
-→ 美国静态住宅IP
+→ 静态住宅IP
+→ 如果选择某个静态住宅 SOCKS5 出口，会按“自建节点”分组决定前置链路
+→ 如果选择“不使用静态住宅IP”，会直接使用前置订阅节点或自建节点作为出口
+→ 如果选择 ISP 最终出口节点，就直接用该节点作为出口
 → 目标网站
 ```
 
 管理器不会直接改写 `yamls/config.yaml` 里的原始代理组。ShellCrash 启动时会先按订阅生成临时配置，管理器再在临时配置里做一层封装：
 
-- `AI网站`、`媒体解锁`、`漏网之鱼` 等原始分组仍然保留原来的节点列表，用户可以继续在面板里选择不同节点。
-- 运行时会额外生成 `美国静态住宅IP-AI网站` 这类封装组。
-- 规则会临时指向封装组，封装组再通过原始分组作为前置连接住宅 SOCKS5。
+- `AI网站`、`媒体解锁`、`漏网之鱼` 等原始分组仍然来自订阅，更新订阅时照常更新。
+- 运行时只把原本需要代理的规则统一指向 `静态住宅IP`，不再生成一堆 `静态住宅IP-AI网站` 这类可见分组。
+- `自建节点` 选 `使用订阅节点` 时，静态住宅出口会使用当前订阅里真实存在的代理分组作为前置链路；换订阅后会重新识别，不依赖固定分组名。
+- `自建节点` 选 `直接使用静态住宅IP` 时，会直接连接 `静态住宅IP` 当前选中的最终出口，适合确认某个 ISP 或住宅出口能不能单独使用。
+- `自建节点` 选择某台自建服务器时，会先连这台自建服务器，再连接 `静态住宅IP` 当前选中的最终出口。
 - 如果封装后的配置没有通过内核校验，管理器会自动回滚到 ShellCrash 原始运行配置，避免服务启动失败。
 
-所以你在 `/tmp/ShellCrash/config.yaml` 里会看到更多 `美国静态住宅IP-...` 名称，这是运行时封装，不是新增了一份大规则，也不会写回订阅原始文件。
+所以更新订阅后，页面里只需要重点看 `自建节点` 和 `静态住宅IP` 这两个管理器新增分组。
 
 如果在运行时合并配置 `/tmp/ShellCrash/config.yaml` 里看到 `rule-providers: cn` 或 `rule-set:cn`，它来自 ShellCrash 在 `mix` / `route` DNS 模式下的自动 DNS 优化，不属于住宅出口规则。需要完全不生成这段时，可以把 DNS 模式切到 `redir_host`，但这会改变 DNS 处理方式。
 
@@ -211,75 +219,11 @@ tar -zxf /tmp/shellcrash-manager-restore.tar.gz -C /tmp
 /bin/ash /tmp/shellcrash-residential-manager/install.sh
 ```
 
-## 新服务器一键安装
+## 新服务器安装
 
-把推荐脚本复制到新的 Debian 服务器后执行：
+服务器节点的安装步骤已单独整理到：
 
-```sh
-sh install-reality-node.sh
-```
-
-默认会安装：
-
-```text
-Xray + VLESS Reality/XUDP
-端口：443
-UUID、Reality 密钥、Short ID：自动生成
-```
-
-更推荐长期使用的服务器节点是 `VLESS Reality + XUDP`：
-
-```text
-入口：VLESS Reality / TCP 443
-UDP 承载：packet-encoding: xudp
-伪装 SNI：常见 HTTPS 域名，例如 www.microsoft.com
-```
-
-选择理由：
-
-- 比 HY2/UDP 更不容易被运营商 UDP 抖动影响。
-- 不依赖 Let’s Encrypt 证书，适合 `cn.mt` 这类共享后缀已经触发证书限额的情况。
-- 和当前防泄露策略更兼容，因为 HY2 本质依赖 UDP/QUIC，容易被国外 QUIC 拦截规则误伤。
-
-HY2/UDP 更适合做“测速很快时的备用高速节点”，不建议作为默认稳定节点。
-
-安装完成后，真实节点信息会保存在服务器：
-
-```text
-/root/shellcrash-node/node-info.txt
-```
-
-如果想自定义名称、端口或域名，可以这样运行：
-
-```sh
-NODE_NAME='ISP出口-1' NODE_DOMAIN='example.com' NODE_PORT=443 sh install-reality-node.sh
-```
-
-如果这台服务器只是中转，最终还要走另一台 VLESS Reality ISP 服务器，可以这样运行：
-
-```sh
-UPSTREAM_SERVER='yikeyun.cn.mt' \
-UPSTREAM_UUID='上游UUID' \
-UPSTREAM_PUBLIC_KEY='上游Reality公钥' \
-UPSTREAM_SHORT_ID='上游ShortID' \
-sh install-reality-node.sh
-```
-
-旧 Shadowsocks 脚本仍然保留：
-
-```sh
-sh install-static-node.sh
-```
-
-安装脚本会做这些事情：
-
-- 自动安装依赖。
-- Debian 10 源不可用时，会切换到 archive 源。
-- 安装或复用 Xray。
-- 写入 Reality 或 Shadowsocks 入站配置。
-- 开启 BBR、TCP Fast Open。
-- 设置 Xray 开机自启。
-- 生成节点信息文件，方便复制到管理页面。
+[服务器节点安装教程](https://github.com/jjh886/shellcrash-residential-manager/blob/main/SERVER_NODE_INSTALL.md)
 
 ## 域名和伪装
 

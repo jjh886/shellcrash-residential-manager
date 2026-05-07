@@ -8,7 +8,12 @@ OUT="$ROOT/../shellcrash-manager-restore.tar.gz"
 
 tar -czf "$OUT" \
   -C "$ROOT/.." \
+  --exclude 'shellcrash-residential-manager/.git' \
   --exclude 'shellcrash-residential-manager/backups' \
+  --exclude 'shellcrash-residential-manager/custom-nodes.db' \
+  --exclude 'shellcrash-residential-manager/residential-nodes.db' \
+  --exclude 'shellcrash-residential-manager/scripts/install-reality-node.sh' \
+  --exclude 'shellcrash-residential-manager/scripts/install-static-node.sh' \
   --exclude 'shellcrash-residential-manager/*.tar.gz' \
   shellcrash-residential-manager
 

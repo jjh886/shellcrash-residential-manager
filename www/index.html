@@ -13,7 +13,10 @@
         <h1>ShellCrash 管理器</h1>
         <div class="sub" id="pathLine">正在读取路由器状态</div>
       </div>
-      <div class="status" id="statusPills"></div>
+      <div class="header-actions">
+        <button class="primary quick-restart" data-action="restart">重启 ShellCrash</button>
+        <div class="status" id="statusPills"></div>
+      </div>
     </div>
   </header>
 
@@ -21,7 +24,8 @@
     <button class="active" data-tab="overview">总览</button>
     <button data-tab="panel">面板</button>
     <button data-tab="rules">订阅规则</button>
-    <button data-tab="nodes">静态出口</button>
+    <button data-tab="residential">住宅出口</button>
+    <button data-tab="nodes">自建节点</button>
     <button data-tab="settings">功能设置</button>
     <button data-tab="leak">防泄露</button>
     <button data-tab="tasks">任务命令</button>
@@ -119,32 +123,6 @@
 
     <section>
       <div class="section-head">
-        <h2>住宅出口</h2>
-        <button data-action="saveResidential">保存住宅出口</button>
-      </div>
-      <div class="grid">
-        <div>
-          <label for="server">住宅出口服务器</label>
-          <input id="server" placeholder="IP">
-        </div>
-        <div>
-          <label for="port">端口</label>
-          <input id="port" inputmode="numeric" placeholder="443">
-        </div>
-        <div>
-          <label for="username">账号</label>
-          <input id="username" autocomplete="off" placeholder="留空保留当前账号">
-        </div>
-        <div>
-          <label for="password">密码</label>
-          <input id="password" type="password" autocomplete="off" placeholder="留空保留当前密码">
-        </div>
-        <div class="full field-tip">住宅出口用于最终访问海外网站；账号或密码留空时，会继续保留路由器里已经保存的旧值。</div>
-      </div>
-    </section>
-
-    <section>
-      <div class="section-head">
         <h2>分流网站</h2>
         <button data-action="saveRules">保存分流网站</button>
       </div>
@@ -155,9 +133,9 @@
           <div class="field-tip">适合精确域名后缀，比如 cn 表示 .cn 域名，mi.com 表示 mi.com 和它的子域名。</div>
         </div>
         <div>
-          <label for="proxyDomains">海外/住宅出口网站后缀</label>
+          <label for="proxyDomains">海外/静态住宅出口网站后缀</label>
           <textarea id="proxyDomains" rows="7" placeholder="chatgpt.com&#10;openai.com"></textarea>
-          <div class="field-tip">适合固定网站后缀，填在这里的网站会强制走美国静态住宅 IP。</div>
+          <div class="field-tip">适合固定网站后缀，填在这里的网站会强制走“静态住宅IP”分组。</div>
         </div>
         <div>
           <label for="directKeywords">本地直连关键词</label>
@@ -165,19 +143,66 @@
           <div class="field-tip">关键词是包含匹配。比如 cn 会匹配所有域名里含 cn 的请求；只想匹配 .cn 时，请填到上方“网站后缀”。</div>
         </div>
         <div>
-          <label for="proxyKeywords">海外/住宅出口关键词</label>
+          <label for="proxyKeywords">海外/静态住宅出口关键词</label>
           <textarea id="proxyKeywords" rows="5" placeholder="google&#10;gemini&#10;openai&#10;claude&#10;anthropic"></textarea>
-          <div class="field-tip">适合 AI 或海外服务关键词，命中后会强制走美国静态住宅 IP。</div>
+          <div class="field-tip">适合 AI 或海外服务关键词，命中后会强制走“静态住宅IP”分组。</div>
         </div>
       </div>
       <div class="note">这里是少量手动补丁，不会再生成大段默认规则；留空时完全交给订阅和 ShellCrash 原规则。</div>
     </section>
   </main>
 
+  <main class="tab-panel" id="tab-residential">
+    <section>
+      <div class="section-head">
+        <h2>静态住宅出口</h2>
+        <div class="head-actions">
+          <button data-res-action="clear">新建出口</button>
+          <button class="primary" data-res-action="save">保存出口</button>
+        </div>
+      </div>
+      <div class="grid">
+        <input id="resId" type="hidden">
+        <div>
+          <label for="resName">出口名称</label>
+          <input id="resName" placeholder="静态住宅IP-出口">
+        </div>
+        <div>
+          <label for="resServer">服务器地址</label>
+          <input id="resServer" placeholder="IP 或域名">
+        </div>
+        <div>
+          <label for="resPort">端口</label>
+          <input id="resPort" inputmode="numeric" placeholder="443">
+        </div>
+        <div>
+          <label for="resUsername">账号</label>
+          <input id="resUsername" autocomplete="off" placeholder="Socks5 账号">
+        </div>
+        <div>
+          <label for="resPassword">密码</label>
+          <input id="resPassword" type="password" autocomplete="off" placeholder="编辑时留空保留旧密码">
+        </div>
+        <div class="check-grid">
+          <label><input id="resEnabled" type="checkbox"> 启用这个出口</label>
+        </div>
+        <div class="full field-tip">保存后会出现在 ShellCrash 面板的“静态住宅IP”分组里；选择“不使用静态住宅IP”时，请求会停在前置订阅节点或自建节点上。</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>出口列表</h2>
+        <button data-res-action="apply">重新生成静态住宅配置</button>
+      </div>
+      <div class="node-list" id="resList"></div>
+    </section>
+  </main>
+
   <main class="tab-panel" id="tab-nodes">
     <section>
       <div class="section-head">
-        <h2>静态出口节点</h2>
+        <h2>自建节点</h2>
         <div class="head-actions">
           <button data-node-action="clear">新建节点</button>
           <button class="primary" data-node-action="save">保存节点</button>
@@ -241,10 +266,10 @@
         </div>
         <div class="check-grid full">
           <label><input id="nodeEnabled" type="checkbox"> 启用这个节点</label>
-          <label><input id="nodeUseResidential" type="checkbox"> 这个节点只做中转，最终走住宅出口</label>
+          <label><input id="nodeUseResidential" type="checkbox"> ISP 作为最终出口</label>
         </div>
       </div>
-      <div class="note">不勾选时，这台服务器自己的 IP 就是最终出口；勾选时，会生成“美国静态住宅IP-经-节点名”，适合把 VPS 当中转，最终仍从住宅出口出去。域名方便迁移和 TLS/Reality 伪装，但如果同一个 IP 已被封，单纯换域名不能绕过 IP 封锁。</div>
+      <div class="note">勾选后，这个节点会出现在“静态住宅IP”分组里，表示它自己就是最终出口；不勾选时，它只作为“自建节点”里的前置节点，后面还会继续走“静态住宅IP”当前选中的出口。</div>
     </section>
 
     <section>
@@ -253,7 +278,7 @@
         <button data-node-action="apply">重新生成配置</button>
       </div>
       <div class="node-list" id="nodeList"></div>
-      <div class="note">服务器安装脚本路径：<code id="nodeScriptPath">/data/other_vol/shellcrash-manager/scripts/install-reality-node.sh</code>。复制到新 Debian 10/12 服务器后运行，默认生成 VLESS Reality/XUDP 节点。</div>
+      <div class="note"><a href="https://github.com/jjh886/shellcrash-residential-manager/blob/main/SERVER_NODE_INSTALL.md" target="_blank" rel="noreferrer">服务器节点安装教程</a></div>
     </section>
   </main>
 
@@ -446,6 +471,7 @@
 
   <div class="toast" id="toast"></div>
   <script src="/app.js"></script>
+  <script src="/residential.js"></script>
   <script src="/nodes.js"></script>
 </body>
 </html>

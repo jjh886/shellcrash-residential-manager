@@ -1,10 +1,10 @@
 #!/bin/sh
-# Debian 静态出口节点安装脚本。
+# Debian 自建节点安装脚本。
 # 支持 Shadowsocks，或 VLESS + WebSocket + TLS + Nginx 普通网页伪装。
 
 set -eu
 
-NODE_NAME=${NODE_NAME:-云服务器静态住宅IP}
+NODE_NAME=${NODE_NAME:-云服务器自建节点}
 NODE_PROTOCOL=${NODE_PROTOCOL:-shadowsocks}
 NODE_PORT=${NODE_PORT:-443}
 NODE_DOMAIN=${NODE_DOMAIN:-}
@@ -486,7 +486,7 @@ main() {
     restart_xray
     write_node_info
 
-    log "静态出口节点安装完成。"
+    log "自建节点安装完成。"
     log "节点信息已保存：$INFO_FILE"
     if [ "$NODE_PROTOCOL" = "vless-ws-tls" ]; then
         log "协议：VLESS WS TLS，域名：$NODE_DOMAIN，端口：$NODE_PORT，路径：$WS_PATH"

@@ -1,0 +1,422 @@
+#!/bin/ash
+# ShellCrash 高级管理接口：功能设置、防泄露细项、任务命令、YAML 编辑。
+
+BASE=${SHELLCRASH_HOME:-/data/other_vol/ShellCrash}
+APP_DIR=$(cd "$(dirname "$0")/../.." && pwd)
+CFG_FILE="$BASE/configs/ShellCrash.cfg"
+CMD_ENV="$BASE/configs/command.env"
+GT_CFG="$BASE/configs/gateway.cfg"
+LEAK_CONF="$APP_DIR/leak-guard.conf"
+LOG_FILE="$APP_DIR/last-advanced.log"
+BACKUP_DIR="$APP_DIR/backups"
+PARAMS="$QUERY_STRING"
+
+if [ "$REQUEST_METHOD" = "POST" ] && [ "${CONTENT_LENGTH:-0}" -gt 0 ]; then
+    BODY=$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)
+    PARAMS="$PARAMS&$BODY"
+fi
+
+send_json() {
+    printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+    printf '%s\n' "$1"
+    exit 0
+}
+
+json_escape() {
+    printf '%s' "$1" | awk '{
+        gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); gsub(/\t/,"\\t"); gsub(/\r/,"")
+        if (NR > 1) printf "\\n"
+        printf "%s", $0
+    }'
+}
+
+ok() {
+    local message
+    message=$(json_escape "$1")
+    send_json "{\"ok\":true,\"message\":\"$message\"}"
+}
+
+fail() {
+    local message
+    message=$(json_escape "$1")
+    send_json "{\"ok\":false,\"message\":\"$message\"}"
+}
+
+urldecode() {
+    local value
+    value=$(printf '%s' "$1" | sed 's/+/ /g; s/%/\\x/g')
+    printf '%b' "$value"
+}
+
+param() {
+    local key="$1"
+    local raw
+    raw=$(printf '%s' "$PARAMS" | tr '&' '\n' | sed -n "s/^$key=//p" | tail -n 1)
+    urldecode "$raw"
+}
+
+one_line() {
+    printf '%s' "$1" | tr -d '\r\n'
+}
+
+get_cfg() {
+    local key="$1"
+    local file="${2:-$CFG_FILE}"
+    [ -f "$file" ] || return 0
+    sed -n "s/^$key='\(.*\)'$/\1/p; s/^$key=\(.*\)$/\1/p" "$file" | tail -n 1
+}
+
+set_cfg() {
+    local key="$1"
+    local value="$2"
+    local file="${3:-$CFG_FILE}"
+    local tmp="$file.tmp.$$"
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+    sed "/^$key=.*/d" "$file" > "$tmp"
+    [ -n "$value" ] && printf '%s=%s\n' "$key" "$value" >> "$tmp"
+    mv "$tmp" "$file"
+}
+
+backup_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    mkdir -p "$BACKUP_DIR"
+    cp "$file" "$BACKUP_DIR/$(basename "$file").$(date +%Y%m%d-%H%M%S)" 2>/dev/null
+}
+
+bool_json() {
+    [ "$1" = "ON" ] && echo true || echo false
+}
+
+cpu_snapshot() {
+    # 从 /proc/stat 取两次 CPU 时间片，后面用差值估算当前使用率。
+    set -- $(sed -n '1s/^cpu[[:space:]]*//p' /proc/stat 2>/dev/null)
+    CPU_TOTAL=$(( ${1:-0} + ${2:-0} + ${3:-0} + ${4:-0} + ${5:-0} + ${6:-0} + ${7:-0} + ${8:-0} ))
+    CPU_IDLE=$(( ${4:-0} + ${5:-0} ))
+}
+
+system_info_json() {
+    local t1 i1 t2 i2 dt di cpu mem_raw disk_raw load arch disk_target disk_path
+    local mem_used mem_total mem_pct disk_used disk_total disk_pct load_j arch_j disk_path_j
+    cpu=0
+    if [ -r /proc/stat ]; then
+        cpu_snapshot; t1=$CPU_TOTAL; i1=$CPU_IDLE
+        sleep 1
+        cpu_snapshot; t2=$CPU_TOTAL; i2=$CPU_IDLE
+        dt=$((t2 - t1)); di=$((i2 - i1))
+        [ "$dt" -gt 0 ] && cpu=$(((dt - di) * 100 / dt))
+    fi
+
+    mem_raw=$(awk '
+        /MemTotal:/ {total=$2}
+        /MemAvailable:/ {avail=$2}
+        /MemFree:/ {free=$2}
+        /Buffers:/ {buffers=$2}
+        /^Cached:/ {cached=$2}
+        END {
+            if (avail == "") avail = free + buffers + cached
+            if (total > 0) printf "%d|%d|%d", (total-avail)/1024, total/1024, (total-avail)*100/total
+            else printf "0|0|0"
+        }' /proc/meminfo 2>/dev/null)
+    mem_used=$(printf '%s' "$mem_raw" | cut -d'|' -f1)
+    mem_total=$(printf '%s' "$mem_raw" | cut -d'|' -f2)
+    mem_pct=$(printf '%s' "$mem_raw" | cut -d'|' -f3)
+
+    disk_target="$BASE"
+    [ -d "$disk_target" ] || disk_target=/data/other_vol
+    [ -d "$disk_target" ] || disk_target=/
+    disk_raw=$( { df -kP "$disk_target" 2>/dev/null || df -k "$disk_target" 2>/dev/null; } | awk 'NR > 1 {used=$3; total=$2; pct=$5; path=$6} END {gsub("%","",pct); printf "%d|%d|%s|%s", used/1024, total/1024, pct, path}')
+    disk_used=$(printf '%s' "$disk_raw" | cut -d'|' -f1)
+    disk_total=$(printf '%s' "$disk_raw" | cut -d'|' -f2)
+    disk_pct=$(printf '%s' "$disk_raw" | cut -d'|' -f3)
+    disk_path=$(printf '%s' "$disk_raw" | cut -d'|' -f4)
+
+    load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
+    arch=$(uname -m 2>/dev/null)
+    load_j=$(json_escape "$load")
+    arch_j=$(json_escape "$arch")
+    disk_path_j=$(json_escape "$disk_path")
+    printf '{"cpuPercent":%s,"loadavg":"%s","arch":"%s","memory":{"usedMB":%s,"totalMB":%s,"percent":%s},"disk":{"usedMB":%s,"totalMB":%s,"percent":%s,"path":"%s"}}' \
+        "${cpu:-0}" "$load_j" "$arch_j" "${mem_used:-0}" "${mem_total:-0}" "${mem_pct:-0}" \
+        "${disk_used:-0}" "${disk_total:-0}" "${disk_pct:-0}" "$disk_path_j"
+}
+
+require_shellcrash() {
+    [ -d "$BASE" ] && [ -f "$CFG_FILE" ] && return 0
+    fail "还没有找到 ShellCrash。"
+}
+
+valid_onoff() {
+    [ "$1" = "ON" ] || [ "$1" = "OFF" ]
+}
+
+valid_port() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+read_leak_conf() {
+    BLOCK_QUIC=ON
+    BLOCK_STUN=ON
+    BLOCK_DOT=ON
+    BLOCK_IPV6=ON
+    EXCLUDE_CHINA=ON
+    LAN_IFACE=br-lan
+    [ -f "$LEAK_CONF" ] && . "$LEAK_CONF"
+}
+
+shellcrash_status() {
+    local redir dns skip sniff common quic cn area mix redir_port dns_port db_port start_old delay network_check fw_wan_ports autostart system
+    read_leak_conf
+    redir=$(json_escape "$(get_cfg redir_mod)")
+    dns=$(json_escape "$(get_cfg dns_mod)")
+    area=$(json_escape "$(get_cfg firewall_area)")
+    mix=$(json_escape "$(get_cfg mix_port)")
+    redir_port=$(json_escape "$(get_cfg redir_port)")
+    dns_port=$(json_escape "$(get_cfg dns_port)")
+    db_port=$(json_escape "$(get_cfg db_port)")
+    start_old=$(json_escape "$(get_cfg start_old)")
+    delay=$(json_escape "$(get_cfg start_delay)")
+    network_check=$(json_escape "$(get_cfg network_check)")
+    fw_wan_ports=$(json_escape "$(get_cfg fw_wan_ports "$GT_CFG")")
+    [ -d "$BASE" ] && [ ! -f "$BASE/.dis_startup" ] && autostart=true || autostart=false
+    skip=$(bool_json "$(get_cfg skip_cert)")
+    sniff=$(bool_json "$(get_cfg sniffer)")
+    common=$(bool_json "$(get_cfg common_ports)")
+    quic=$(bool_json "$(get_cfg quic_rj)")
+    cn=$(bool_json "$(get_cfg cn_ip_route)")
+    system=$(system_info_json)
+
+    send_json "{\"ok\":true,\"settings\":{\"redirMod\":\"$redir\",\"dnsMod\":\"$dns\",\"firewallArea\":\"$area\",\"mixPort\":\"$mix\",\"redirPort\":\"$redir_port\",\"dnsPort\":\"$dns_port\",\"dbPort\":\"$db_port\",\"skipCert\":$skip,\"sniffer\":$sniff,\"commonPorts\":$common,\"quicReject\":$quic,\"cnIpRoute\":$cn,\"startOld\":\"$start_old\",\"startDelay\":\"$delay\",\"networkCheck\":\"$network_check\",\"autostart\":$autostart,\"wanPorts\":\"$fw_wan_ports\"},\"leak\":{\"blockQuic\":\"$BLOCK_QUIC\",\"blockStun\":\"$BLOCK_STUN\",\"blockDot\":\"$BLOCK_DOT\",\"blockIpv6\":\"$BLOCK_IPV6\",\"excludeChina\":\"$EXCLUDE_CHINA\",\"lanIface\":\"$LAN_IFACE\"},\"system\":$system}"
+}
+
+save_settings() {
+    local redir dns area mix redirp dnsp dbp skip sniff common quic cn start_old delay network_check
+    require_shellcrash
+    redir=$(one_line "$(param redir_mod)")
+    dns=$(one_line "$(param dns_mod)")
+    area=$(one_line "$(param firewall_area)")
+    mix=$(one_line "$(param mix_port)")
+    redirp=$(one_line "$(param redir_port)")
+    dnsp=$(one_line "$(param dns_port)")
+    dbp=$(one_line "$(param db_port)")
+    skip=$(one_line "$(param skip_cert)")
+    sniff=$(one_line "$(param sniffer)")
+    common=$(one_line "$(param common_ports)")
+    quic=$(one_line "$(param quic_rj)")
+    cn=$(one_line "$(param cn_ip_route)")
+    start_old=$(one_line "$(param start_old)")
+    delay=$(one_line "$(param start_delay)")
+    network_check=$(one_line "$(param network_check)")
+
+    case "$redir" in Redir模式|混合模式|Tproxy模式|Tun模式|纯净模式|'') ;; *) fail "路由模式不在允许列表内。" ;; esac
+    case "$dns" in mix|redir_host|fake-ip|hosts|'') ;; *) fail "DNS 模式不在允许列表内。" ;; esac
+    case "$area" in 1|2|3|4|'') ;; *) fail "劫持范围只能选择 1-4。" ;; esac
+    for value in "$mix" "$redirp" "$dnsp" "$dbp"; do
+        [ -z "$value" ] || valid_port "$value" || fail "端口必须是 1-65535。"
+    done
+    for value in "$skip" "$sniff" "$common" "$quic" "$cn" "$start_old" "$network_check"; do
+        [ -z "$value" ] || valid_onoff "$value" || fail "开关值只能是 ON 或 OFF。"
+    done
+    case "$delay" in ''|[0-9]|[0-9][0-9]|[0-2][0-9][0-9]|300) ;; *) fail "自启延迟只能是 0-300 秒。" ;; esac
+
+    backup_file "$CFG_FILE"
+    [ -n "$redir" ] && set_cfg redir_mod "$redir"
+    [ -n "$dns" ] && set_cfg dns_mod "$dns"
+    [ -n "$area" ] && set_cfg firewall_area "$area"
+    [ -n "$mix" ] && set_cfg mix_port "$mix"
+    [ -n "$redirp" ] && set_cfg redir_port "$redirp"
+    [ -n "$dnsp" ] && set_cfg dns_port "$dnsp"
+    [ -n "$dbp" ] && set_cfg db_port "$dbp"
+    [ -n "$skip" ] && set_cfg skip_cert "$skip"
+    [ -n "$sniff" ] && set_cfg sniffer "$sniff"
+    [ -n "$common" ] && set_cfg common_ports "$common"
+    [ -n "$quic" ] && set_cfg quic_rj "$quic"
+    [ -n "$cn" ] && set_cfg cn_ip_route "$cn"
+    [ -n "$start_old" ] && set_cfg start_old "$start_old"
+    [ -n "$delay" ] && set_cfg start_delay "$delay"
+    [ -n "$network_check" ] && set_cfg network_check "$network_check"
+    ok "高级功能设置已保存，重启 ShellCrash 后完全生效。"
+}
+
+save_leak() {
+    local quic stun dot ipv6 cn iface
+    quic=$(one_line "$(param block_quic)")
+    stun=$(one_line "$(param block_stun)")
+    dot=$(one_line "$(param block_dot)")
+    ipv6=$(one_line "$(param block_ipv6)")
+    cn=$(one_line "$(param exclude_china)")
+    iface=$(one_line "$(param lan_iface)")
+    for value in "$quic" "$stun" "$dot" "$ipv6" "$cn"; do
+        valid_onoff "$value" || fail "防泄露开关只能是 ON 或 OFF。"
+    done
+    echo "$iface" | grep -Eq '^[A-Za-z0-9_.:-]+$' || fail "网卡名格式不正确。"
+
+    cat > "$LEAK_CONF" <<EOF
+BLOCK_QUIC=$quic
+BLOCK_STUN=$stun
+BLOCK_DOT=$dot
+BLOCK_IPV6=$ipv6
+EXCLUDE_CHINA=$cn
+LAN_IFACE=$iface
+EOF
+    [ -x "$APP_DIR/scripts/setup-shellcrash-custom.sh" ] && "$APP_DIR/scripts/setup-shellcrash-custom.sh" >/dev/null 2>&1
+    [ -x "$BASE/task/block_proxy_leaks.sh" ] && "$BASE/task/block_proxy_leaks.sh" >"$LOG_FILE" 2>&1
+    ok "防泄露设置已保存并重新应用。"
+}
+
+run_builtin() {
+    local cmd
+    cmd=$(one_line "$(param cmd)")
+    require_shellcrash
+    case "$cmd" in
+        update_scripts) ( "$BASE/task/task.sh" update_scripts >"$LOG_FILE" 2>&1 ) & ;;
+        update_core) ( "$BASE/task/task.sh" update_core >"$LOG_FILE" 2>&1 ) & ;;
+        update_mmdb) ( "$BASE/task/task.sh" update_mmdb >"$LOG_FILE" 2>&1 ) & ;;
+        reset_firewall) ( "$BASE/task/task.sh" reset_firewall >"$LOG_FILE" 2>&1 ) & ;;
+        hotupdate) ( "$BASE/task/task.sh" hotupdate >"$LOG_FILE" 2>&1 ) & ;;
+        *) fail "未知内置命令。" ;;
+    esac
+    ok "命令已开始执行，可查看高级日志。"
+}
+
+task_list() {
+    local content
+    require_shellcrash
+    content=$(cat "$BASE/task/task.list" "$BASE/task/task.user" 2>/dev/null | grep -Ev '^(#|$)' | awk -F '#' '{print $1" | "$3" | "$2"}')
+    content=$(json_escape "$content")
+    send_json "{\"ok\":true,\"content\":\"$content\"}"
+}
+
+add_task() {
+    local command name max_id task_id
+    require_shellcrash
+    command=$(one_line "$(param command)")
+    name=$(one_line "$(param name)")
+    [ -n "$command" ] || fail "命令不能为空。"
+    echo "$command" | grep -q '#' && fail "命令不能包含 #。"
+    max_id=$(awk -F '#' '{print $1}' "$BASE/task/task.user" 2>/dev/null | sort -n | tail -n 1)
+    [ -n "$max_id" ] || max_id=200
+    task_id=$((max_id + 1))
+    [ -n "$name" ] || name="自定义任务$task_id"
+    mkdir -p "$BASE/task"
+    echo "$task_id#$command#$name" >> "$BASE/task/task.user"
+    ok "自定义任务已添加。"
+}
+
+delete_task() {
+    local id
+    require_shellcrash
+    id=$(one_line "$(param id)")
+    echo "$id" | grep -Eq '^[0-9]+$' || fail "任务 ID 必须是数字。"
+    sed -i "/^$id#/d" "$BASE/task/task.user" 2>/dev/null
+    ok "自定义任务已删除。"
+}
+
+run_custom_command() {
+    local command
+    require_shellcrash
+    command=$(param command)
+    [ -n "$command" ] || fail "命令不能为空。"
+    ( cd "$BASE" && /bin/ash -c "$command" >"$LOG_FILE" 2>&1 ) &
+    ok "自定义命令已开始执行。"
+}
+
+yaml_path() {
+    case "$(one_line "$(param file)")" in
+        subscription) echo "$BASE/yamls/config.yaml" ;;
+        merged) echo "/tmp/ShellCrash/config.yaml" ;;
+        proxies) echo "$BASE/yamls/proxies.yaml" ;;
+        groups) echo "$BASE/yamls/proxy-groups.yaml" ;;
+        rules) echo "$BASE/yamls/rules.yaml" ;;
+        others) echo "$BASE/yamls/others.yaml" ;;
+        *) return 1 ;;
+    esac
+}
+
+read_yaml() {
+    local file content key readonly path_j
+    key=$(one_line "$(param file)")
+    file=$(yaml_path) || fail "未知 YAML 文件。"
+    [ "$key" = "merged" ] && readonly=true || readonly=false
+    path_j=$(json_escape "$file")
+    content=$(cat "$file" 2>/dev/null)
+    content=$(json_escape "$content")
+    send_json "{\"ok\":true,\"readonly\":$readonly,\"path\":\"$path_j\",\"content\":\"$content\"}"
+}
+
+save_yaml() {
+    local file content key
+    key=$(one_line "$(param file)")
+    [ "$key" = "merged" ] && fail "运行时合并配置只能查看，不能直接保存。"
+    file=$(yaml_path) || fail "未知 YAML 文件。"
+    content=$(param content)
+    backup_file "$file"
+    mkdir -p "$(dirname "$file")"
+    printf '%s\n' "$content" > "$file"
+    chmod 600 "$file" 2>/dev/null
+    ok "YAML 已保存。"
+}
+
+install_panel() {
+    local panel_type panel_port panel_path ui_url default_url
+    require_shellcrash
+    panel_type=$(one_line "$(param panel_type)")
+    panel_port=$(one_line "$(param panel_port)")
+    panel_path=$(one_line "$(param panel_path)")
+    ui_url=$(one_line "$(param external_ui_url)")
+    [ -n "$panel_port" ] || panel_port=9999
+    [ -n "$panel_path" ] || panel_path=/ui
+    valid_port "$panel_port" || fail "面板端口必须是 1-65535。"
+    echo "$panel_path" | grep -Eq '^/[A-Za-z0-9_./-]*$' || fail "面板路径需要以 / 开头，比如 /ui。"
+    case "$panel_type" in
+        zashboard) default_url="https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip" ;;
+        meta_xd) default_url="https://raw.githubusercontent.com/juewuy/ShellCrash/update/bin/dashboard/meta_xd.tar.gz" ;;
+        meta_yacd|clashdb|meta_db|yacd) ;;
+        *) fail "未知面板类型。" ;;
+    esac
+    [ -n "$ui_url" ] || ui_url="$default_url"
+    backup_file "$CFG_FILE"
+    set_cfg db_port "$panel_port"
+    set_cfg hostdir ":$panel_port$panel_path"
+    [ -n "$ui_url" ] && set_cfg external_ui_url "$ui_url"
+    (
+        export CRASHDIR="$BASE"
+        . "$BASE/init.sh" >/dev/null 2>&1
+        . "$BASE/menus/9_upgrade.sh" >/dev/null 2>&1
+        db_type="$panel_type"
+        db_port="$panel_port"
+        dbdir="$BASE/ui"
+        hostdir=":$panel_port$panel_path"
+        [ -n "$ui_url" ] && setconfig external_ui_url "$ui_url"
+        rm -rf "$dbdir"
+        getdb
+    ) >"$LOG_FILE" 2>&1 &
+    ok "面板安装已开始，稍后刷新面板即可查看。"
+}
+
+read_log() {
+    local content
+    content=$(tail -n 120 "$LOG_FILE" 2>/dev/null)
+    content=$(json_escape "$content")
+    send_json "{\"ok\":true,\"content\":\"$content\"}"
+}
+
+case "$(one_line "$(param action)")" in
+    status) shellcrash_status ;;
+    save_settings) save_settings ;;
+    save_leak) save_leak ;;
+    run_builtin) run_builtin ;;
+    task_list) task_list ;;
+    add_task) add_task ;;
+    delete_task) delete_task ;;
+    run_custom_command) run_custom_command ;;
+    read_yaml) read_yaml ;;
+    save_yaml) save_yaml ;;
+    install_panel) install_panel ;;
+    log) read_log ;;
+    *) fail "未知操作。" ;;
+esac

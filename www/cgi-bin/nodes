@@ -1,0 +1,161 @@
+#!/bin/ash
+# 自建节点接口：新增、编辑、删除多台服务器节点。
+
+BASE=${SHELLCRASH_HOME:-/data/other_vol/ShellCrash}
+APP_DIR=$(cd "$(dirname "$0")/../.." && pwd)
+CUSTOM_NODES_FILE="$APP_DIR/custom-nodes.db"
+NODE_HELPERS="$APP_DIR/scripts/custom_nodes.sh"
+SETUP_SCRIPT="$APP_DIR/scripts/setup-shellcrash-custom.sh"
+LOG_FILE="$APP_DIR/last-nodes.log"
+PARAMS="$QUERY_STRING"
+[ -f "$NODE_HELPERS" ] && . "$NODE_HELPERS"
+
+[ "$REQUEST_METHOD" = "POST" ] && [ "${CONTENT_LENGTH:-0}" -gt 0 ] && {
+    PARAMS="$PARAMS&$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
+}
+
+send_json() {
+    printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+    printf '%s\n' "$1"
+    exit 0
+}
+
+json_escape() {
+    printf '%s' "$1" | awk '{
+        gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); gsub(/\t/,"\\t"); gsub(/\r/,"")
+        if (NR > 1) printf "\\n"
+        printf "%s", $0
+    }'
+}
+
+urldecode() {
+    local value
+    value=$(printf '%s' "$1" | sed 's/+/ /g; s/%/\\x/g')
+    printf '%b' "$value"
+}
+
+param() {
+    local key="$1" raw
+    raw=$(printf '%s' "$PARAMS" | tr '&' '\n' | sed -n "s/^$key=//p" | tail -n 1)
+    urldecode "$raw"
+}
+
+one_line() {
+    printf '%s' "$1" | tr -d '\r\n'
+}
+
+ok() {
+    local message
+    message=$(json_escape "$1")
+    send_json "{\"ok\":true,\"message\":\"$message\"}"
+}
+
+fail() {
+    local message
+    message=$(json_escape "$1")
+    send_json "{\"ok\":false,\"message\":\"$message\"}"
+}
+
+mask_value() {
+    local value="$1" len=${#value}
+    [ -n "$value" ] || { echo ""; return; }
+    [ "$len" -le 6 ] && { echo "***"; return; }
+    printf '%s***%s' "$(printf '%s' "$value" | cut -c 1-2)" "$(printf '%s' "$value" | sed 's/.*\(..\)$/\1/')"
+}
+
+list_nodes() {
+    local first=1 password_mask
+    printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
+    printf '{"ok":true,"nodes":['
+    [ -f "$CUSTOM_NODES_FILE" ] && while IFS='|' read -r id enabled name proto server port username password cipher uuid sni flow public_key short_id use_residential; do
+        [ -n "$id" ] || continue
+        password_mask=$(json_escape "$(mask_value "$password")")
+        [ "$first" = 1 ] || printf ','
+        first=0
+        printf '{"id":"%s","enabled":"%s","name":"%s","type":"%s","server":"%s","port":"%s","username":"%s","passwordMasked":"%s","cipher":"%s","uuid":"%s","sni":"%s","flow":"%s","publicKey":"%s","shortId":"%s","useResidential":"%s"}' \
+            "$(json_escape "$id")" "$(json_escape "$enabled")" "$(json_escape "$name")" \
+            "$(json_escape "$proto")" "$(json_escape "$server")" "$(json_escape "$port")" \
+            "$(json_escape "$username")" "$password_mask" "$(json_escape "$cipher")" \
+            "$(json_escape "$uuid")" "$(json_escape "$sni")" "$(json_escape "$flow")" \
+            "$(json_escape "$public_key")" "$(json_escape "$short_id")" "$(json_escape "$use_residential")"
+    done < "$CUSTOM_NODES_FILE"
+    printf ']}\n'
+    exit 0
+}
+
+save_node() {
+    local id enabled name proto server port username password cipher uuid sni flow public_key short_id use_residential
+    local old old_password tmp
+    id=$(one_line "$(param id)")
+    enabled=$(one_line "$(param enabled)")
+    name=$(one_line "$(param name)")
+    proto=$(one_line "$(param type)")
+    server=$(one_line "$(param server)")
+    port=$(one_line "$(param port)")
+    username=$(one_line "$(param username)")
+    password=$(one_line "$(param password)")
+    cipher=$(one_line "$(param cipher)")
+    uuid=$(one_line "$(param uuid)")
+    sni=$(one_line "$(param sni)")
+    flow=$(one_line "$(param flow)")
+    public_key=$(one_line "$(param public_key)")
+    short_id=$(one_line "$(param short_id)")
+    use_residential=$(one_line "$(param use_residential)")
+
+    [ -n "$id" ] || id="$(date +%s)"
+    [ "$enabled" = "OFF" ] || enabled=ON
+    [ "$use_residential" = "ON" ] || use_residential=OFF
+    case "$proto" in shadowsocks|ss|socks5|http|vless|vless-ws-tls) ;; *) fail "协议只能选择 Shadowsocks、Socks5、HTTP、VLESS Reality 或 VLESS WS TLS。" ;; esac
+    [ -n "$name" ] || fail "节点名称不能为空。"
+    [ -n "$server" ] || fail "服务器地址不能为空。"
+    valid_port_value "$port" || fail "端口必须是 1-65535。"
+    [ -f "$CUSTOM_NODES_FILE" ] && awk -F'|' -v id="$id" -v name="$name" '$1 != id && $3 == name {found=1} END {exit found ? 0 : 1}' "$CUSTOM_NODES_FILE" && fail "节点名称不能重复，请换一个名称。"
+
+    old=$(find_node_line "$id")
+    old_password=$(printf '%s' "$old" | awk -F'|' '{print $8}')
+    [ -n "$password" ] || password="$old_password"
+    if [ "$proto" = "ss" ] || [ "$proto" = "shadowsocks" ]; then
+        [ -n "$cipher" ] || cipher=aes-128-gcm
+        [ -n "$password" ] || fail "Shadowsocks 节点必须填写密码。"
+    fi
+    case "$proto" in
+        vless|vless-ws-tls) [ -n "$uuid" ] || fail "VLESS 节点必须填写 UUID。" ;;
+    esac
+
+    mkdir -p "$APP_DIR"
+    tmp="$CUSTOM_NODES_FILE.tmp.$$"
+    [ -f "$CUSTOM_NODES_FILE" ] && awk -F'|' -v id="$id" '$1 != id' "$CUSTOM_NODES_FILE" > "$tmp" || : > "$tmp"
+    node_line "$id" "$enabled" "$name" "$proto" "$server" "$port" "$username" "$password" \
+        "$cipher" "$uuid" "$sni" "$flow" "$public_key" "$short_id" "$use_residential" >> "$tmp"
+    mv "$tmp" "$CUSTOM_NODES_FILE"
+    chmod 600 "$CUSTOM_NODES_FILE" 2>/dev/null
+    [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >"$LOG_FILE" 2>&1
+    ok "自建节点已保存，重启 ShellCrash 后完全生效。"
+}
+
+delete_node() {
+    local id tmp
+    id=$(one_line "$(param id)")
+    [ -n "$id" ] || fail "请选择要删除的节点。"
+    tmp="$CUSTOM_NODES_FILE.tmp.$$"
+    [ -f "$CUSTOM_NODES_FILE" ] && awk -F'|' -v id="$id" '$1 != id' "$CUSTOM_NODES_FILE" > "$tmp" || : > "$tmp"
+    mv "$tmp" "$CUSTOM_NODES_FILE"
+    [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >"$LOG_FILE" 2>&1
+    ok "自建节点已删除，重启 ShellCrash 后完全生效。"
+}
+
+apply_nodes() {
+    [ -x "$SETUP_SCRIPT" ] || fail "没有找到配置生成脚本。"
+    SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >"$LOG_FILE" 2>&1
+    ok "节点配置已重新生成，重启 ShellCrash 后完全生效。"
+}
+
+action=$(one_line "$(param action)")
+[ -n "$action" ] || action=list
+case "$action" in
+    list) list_nodes ;;
+    save) save_node ;;
+    delete) delete_node ;;
+    apply) apply_nodes ;;
+    *) fail "未知操作。" ;;
+esac

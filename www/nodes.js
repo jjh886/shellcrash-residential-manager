@@ -66,7 +66,7 @@ function editNode(node) {
 function renderNodes(nodes = []) {
   const box = $('nodeList');
   if (!nodes.length) {
-    box.innerHTML = '<div class="empty">还没有静态出口节点。</div>';
+    box.innerHTML = '<div class="empty">还没有自建节点。</div>';
     return;
   }
   box.innerHTML = nodes.map((node) => `
@@ -77,7 +77,7 @@ function renderNodes(nodes = []) {
       </div>
       <div class="node-meta">
         <span>${node.enabled === 'OFF' ? '已停用' : '已启用'}</span>
-        <span>${node.useResidential === 'ON' ? '中转到住宅出口' : '节点自身作为出口'}</span>
+        <span>${node.useResidential === 'ON' ? 'ISP 最终出口' : '前置自建节点'}</span>
       </div>
       <div class="node-actions">
         <button data-node-edit="${node.id}">编辑</button>
@@ -90,10 +90,7 @@ function renderNodes(nodes = []) {
 
 async function loadNodes() {
   const data = await nodeRequest('list');
-  if (data.ok) {
-    renderNodes(data.nodes || []);
-    $('nodeScriptPath').textContent = data.installScript || '/data/other_vol/shellcrash-manager/scripts/install-static-node.sh';
-  }
+  if (data.ok) renderNodes(data.nodes || []);
 }
 
 async function runNodeAction(action) {

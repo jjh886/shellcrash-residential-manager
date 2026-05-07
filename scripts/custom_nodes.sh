@@ -1,5 +1,5 @@
 #!/bin/ash
-# 自定义静态出口节点：统一生成 ShellCrash 可识别的 proxies YAML。
+# 自建节点：统一生成 ShellCrash 可识别的 proxies YAML。
 # 调用方需要设置 APP_DIR；可选设置 CUSTOM_NODES_FILE。
 
 CUSTOM_NODES_FILE=${CUSTOM_NODES_FILE:-$APP_DIR/custom-nodes.db}
@@ -36,9 +36,8 @@ find_node_line() {
 custom_node_names_inline() {
     [ -f "$CUSTOM_NODES_FILE" ] || return 0
     awk -F'|' '
-        $2 == "ON" && $3 != "" {
+        $2 == "ON" && $3 != "" && $15 != "ON" {
             name = $3
-            if ($15 == "ON") name = "美国静态住宅IP-经-" name
             gsub(/\047/, "\047\047", name)
             printf "%s\047%s\047", sep, name
             sep = ", "
@@ -46,34 +45,22 @@ custom_node_names_inline() {
     ' "$CUSTOM_NODES_FILE"
 }
 
-emit_custom_target_comments() {
+custom_isp_final_node_names_inline() {
     [ -f "$CUSTOM_NODES_FILE" ] || return 0
     awk -F'|' '
-        $2 == "ON" && $3 != "" {
+        $2 == "ON" && $3 != "" && $15 == "ON" {
             name = $3
-            if ($15 == "ON") name = "美国静态住宅IP-经-" name
             gsub(/\047/, "\047\047", name)
-            print "# target: \047" name "\047"
+            printf "%s\047%s\047", sep, name
+            sep = ", "
         }
     ' "$CUSTOM_NODES_FILE"
 }
 
 emit_custom_residential_yaml() {
-    [ -f "$CUSTOM_NODES_FILE" ] || return 0
-    local res_server="$1"
-    local res_port="$2"
-    local res_username="$3"
-    local res_password="$4"
-    res_server=$(yaml_quote "$res_server")
-    res_username=$(yaml_quote "$res_username")
-    res_password=$(yaml_quote "$res_password")
-    while IFS='|' read -r id enabled name proto server port username password cipher uuid sni flow public_key short_id use_residential; do
-        [ "$enabled" = "ON" ] || continue
-        [ "$use_residential" = "ON" ] || continue
-        [ -n "$name" ] || continue
-        name=$(yaml_quote "$name")
-        echo "- { name: '美国静态住宅IP-经-$name', type: socks5, server: '$res_server', port: $res_port, username: '$res_username', password: '$res_password', dialer-proxy: '$name' }"
-    done < "$CUSTOM_NODES_FILE"
+    # 旧版本会为每个自建节点生成“静态住宅IP-经-节点名”。
+    # 现在改为两个总分组控制链路，这里保留空函数避免旧调用报错。
+    return 0
 }
 
 custom_direct_node_names_inline() {
@@ -102,17 +89,21 @@ emit_custom_nodes_yaml() {
         flow=$(yaml_quote "$flow")
         public_key=$(yaml_quote "$public_key")
         short_id=$(yaml_quote "$short_id")
+        dialer=""
+        # 勾选“ISP 作为最终出口”的节点会放进最终出口分组；
+        # 给它加 dialer-proxy 后，就能用“自建节点”分组选择直连、订阅前置或自建前置。
+        [ "$use_residential" = "ON" ] && dialer=", dialer-proxy: '自建节点'"
 
         case "$proto" in
             shadowsocks|ss)
                 [ -n "$cipher" ] || cipher=aes-128-gcm
-                echo "- { name: '$name', type: ss, server: '$server', port: $port, cipher: '$cipher', password: '$password', udp: true }"
+                echo "- { name: '$name', type: ss, server: '$server', port: $port, cipher: '$cipher', password: '$password', udp: true$dialer }"
                 ;;
             socks5)
-                echo "- { name: '$name', type: socks5, server: '$server', port: $port, username: '$username', password: '$password', udp: true }"
+                echo "- { name: '$name', type: socks5, server: '$server', port: $port, username: '$username', password: '$password', udp: true$dialer }"
                 ;;
             http)
-                echo "- { name: '$name', type: http, server: '$server', port: $port, username: '$username', password: '$password' }"
+                echo "- { name: '$name', type: http, server: '$server', port: $port, username: '$username', password: '$password'$dialer }"
                 ;;
             vless)
                 [ -n "$sni" ] || sni="$server"
@@ -123,12 +114,12 @@ emit_custom_nodes_yaml() {
                     [ -n "$short_id" ] && line="$line, short-id: '$short_id'"
                     line="$line }"
                 }
-                echo "$line }"
+                echo "$line$dialer }"
                 ;;
             vless-ws-tls)
                 [ -n "$sni" ] || sni="$server"
                 [ -n "$flow" ] || flow="/assets/ws"
-                echo "- { name: '$name', type: vless, server: '$server', port: $port, uuid: '$uuid', network: ws, tls: true, udp: true, packet-encoding: xudp, servername: '$sni', client-fingerprint: chrome, ws-opts: { path: '$flow', headers: { Host: '$sni' } } }"
+                echo "- { name: '$name', type: vless, server: '$server', port: $port, uuid: '$uuid', network: ws, tls: true, udp: true, packet-encoding: xudp, servername: '$sni', client-fingerprint: chrome, ws-opts: { path: '$flow', headers: { Host: '$sni' } }$dialer }"
                 ;;
         esac
     done < "$CUSTOM_NODES_FILE"
