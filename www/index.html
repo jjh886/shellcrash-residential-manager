@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShellCrash 管理器</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div>
+        <h1>ShellCrash 管理器</h1>
+        <div class="sub" id="pathLine">正在读取路由器状态</div>
+      </div>
+      <div class="status" id="statusPills"></div>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="功能分区">
+    <button class="active" data-tab="overview">总览</button>
+    <button data-tab="panel">面板</button>
+    <button data-tab="rules">订阅规则</button>
+    <button data-tab="nodes">静态出口</button>
+    <button data-tab="settings">功能设置</button>
+    <button data-tab="leak">防泄露</button>
+    <button data-tab="tasks">任务命令</button>
+    <button data-tab="yaml">YAML 编辑</button>
+  </nav>
+
+  <main class="tab-panel active" id="tab-overview">
+    <section>
+      <div class="section-head">
+        <h2>系统资源</h2>
+        <button data-action="refresh">刷新资源</button>
+      </div>
+      <div class="metric">
+        <div class="tile"><strong id="cpuUsage">--</strong><span>CPU 使用率</span></div>
+        <div class="tile"><strong id="memUsage">--</strong><span>内存占用</span></div>
+        <div class="tile"><strong id="diskUsage">--</strong><span>磁盘占用</span></div>
+      </div>
+      <div class="note" id="systemLine">打开页面后会自动读取路由器当前负载。</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>当前出口</h2>
+        <button data-action="test">刷新出口</button>
+      </div>
+      <div class="metric">
+        <div class="tile"><strong id="exitIp">--</strong><span>出口 IP</span></div>
+        <div class="tile"><strong id="exitLoc">--</strong><span>出口地区</span></div>
+        <div class="tile"><strong id="exitHttp">--</strong><span>连接协议</span></div>
+      </div>
+      <div class="note" id="exitLine">打开页面后会自动检测 ChatGPT 请求看到的出口。</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>安装与服务</h2>
+        <button data-action="logInstall">安装日志</button>
+      </div>
+      <div class="grid">
+        <div class="full">
+          <label for="installUrl">安装源</label>
+          <input id="installUrl" value="https://testingcf.jsdelivr.net/gh/juewuy/ShellCrash@master">
+        </div>
+        <div>
+          <label for="release">版本</label>
+          <select id="release">
+            <option value="master">公测版 master</option>
+            <option value="stable">稳定版 stable</option>
+            <option value="dev">开发版 dev</option>
+          </select>
+        </div>
+        <div>
+          <label for="alias">命令别名</label>
+          <input id="alias" value="crash">
+        </div>
+        <div class="full">
+          <label for="installDir">安装目录</label>
+          <input id="installDir" value="/data/other_vol/ShellCrash">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="primary" data-action="install">安装 / 覆盖安装</button>
+        <button data-action="start">启动</button>
+        <button data-action="restart">重启</button>
+        <button class="danger" data-action="stop">停止</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>日志</h2>
+        <button data-action="logService">服务日志</button>
+      </div>
+      <pre id="logBox">暂无日志</pre>
+    </section>
+  </main>
+
+  <main class="tab-panel" id="tab-rules">
+    <section>
+      <div class="section-head">
+        <h2>订阅节点</h2>
+        <div class="head-actions">
+          <button data-action="saveSubscription">保存订阅链接</button>
+          <button class="primary" data-action="updateSub">保存并更新订阅</button>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="full">
+          <label for="subscription">订阅链接</label>
+          <input id="subscription" autocomplete="off" placeholder="页面打开后会自动加载当前订阅">
+          <div class="field-tip">需要更换 VPN 订阅时，直接粘贴新链接，再点“保存并更新订阅”。</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>住宅出口</h2>
+        <button data-action="saveResidential">保存住宅出口</button>
+      </div>
+      <div class="grid">
+        <div>
+          <label for="server">住宅出口服务器</label>
+          <input id="server" placeholder="IP">
+        </div>
+        <div>
+          <label for="port">端口</label>
+          <input id="port" inputmode="numeric" placeholder="443">
+        </div>
+        <div>
+          <label for="username">账号</label>
+          <input id="username" autocomplete="off" placeholder="留空保留当前账号">
+        </div>
+        <div>
+          <label for="password">密码</label>
+          <input id="password" type="password" autocomplete="off" placeholder="留空保留当前密码">
+        </div>
+        <div class="full field-tip">住宅出口用于最终访问海外网站；账号或密码留空时，会继续保留路由器里已经保存的旧值。</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>分流网站</h2>
+        <button data-action="saveRules">保存分流网站</button>
+      </div>
+      <div class="grid">
+        <div>
+          <label for="directDomains">本地直连网站后缀</label>
+          <textarea id="directDomains" rows="7" placeholder="example.cn&#10;mi.com"></textarea>
+          <div class="field-tip">适合精确域名后缀，比如 cn 表示 .cn 域名，mi.com 表示 mi.com 和它的子域名。</div>
+        </div>
+        <div>
+          <label for="proxyDomains">海外/住宅出口网站后缀</label>
+          <textarea id="proxyDomains" rows="7" placeholder="chatgpt.com&#10;openai.com"></textarea>
+          <div class="field-tip">适合固定网站后缀，填在这里的网站会强制走美国静态住宅 IP。</div>
+        </div>
+        <div>
+          <label for="directKeywords">本地直连关键词</label>
+          <textarea id="directKeywords" rows="5" placeholder="cn&#10;taobao&#10;douyin"></textarea>
+          <div class="field-tip">关键词是包含匹配。比如 cn 会匹配所有域名里含 cn 的请求；只想匹配 .cn 时，请填到上方“网站后缀”。</div>
+        </div>
+        <div>
+          <label for="proxyKeywords">海外/住宅出口关键词</label>
+          <textarea id="proxyKeywords" rows="5" placeholder="google&#10;gemini&#10;openai&#10;claude&#10;anthropic"></textarea>
+          <div class="field-tip">适合 AI 或海外服务关键词，命中后会强制走美国静态住宅 IP。</div>
+        </div>
+      </div>
+      <div class="note">这里是少量手动补丁，不会再生成大段默认规则；留空时完全交给订阅和 ShellCrash 原规则。</div>
+    </section>
+  </main>
+
+  <main class="tab-panel" id="tab-nodes">
+    <section>
+      <div class="section-head">
+        <h2>静态出口节点</h2>
+        <div class="head-actions">
+          <button data-node-action="clear">新建节点</button>
+          <button class="primary" data-node-action="save">保存节点</button>
+        </div>
+      </div>
+      <div class="grid">
+        <input id="nodeId" type="hidden">
+        <div>
+          <label for="nodeName">节点名称</label>
+          <input id="nodeName" placeholder="云服务器静态住宅IP">
+        </div>
+        <div>
+          <label for="nodeType">协议</label>
+          <select id="nodeType">
+            <option value="shadowsocks">Shadowsocks</option>
+            <option value="socks5">Socks5</option>
+            <option value="http">HTTP</option>
+            <option value="vless">VLESS Reality</option>
+            <option value="vless-ws-tls">VLESS WS TLS</option>
+          </select>
+        </div>
+        <div>
+          <label for="nodeServer">地址</label>
+          <input id="nodeServer" placeholder="IP 或域名">
+        </div>
+        <div>
+          <label for="nodePort">端口</label>
+          <input id="nodePort" inputmode="numeric" placeholder="443">
+        </div>
+        <div>
+          <label for="nodeUsername">账号</label>
+          <input id="nodeUsername" autocomplete="off" placeholder="Socks5/HTTP 可填">
+        </div>
+        <div>
+          <label for="nodePassword">密码</label>
+          <input id="nodePassword" type="password" autocomplete="off" placeholder="编辑时留空保留旧密码">
+        </div>
+        <div>
+          <label for="nodeCipher">加密方式</label>
+          <input id="nodeCipher" value="aes-128-gcm">
+        </div>
+        <div>
+          <label for="nodeUuid">UUID</label>
+          <input id="nodeUuid" autocomplete="off" placeholder="VLESS Reality 使用">
+        </div>
+        <div>
+          <label for="nodeSni">SNI / 域名</label>
+          <input id="nodeSni" placeholder="例如 www.example.com">
+        </div>
+        <div>
+          <label for="nodeFlow">Flow / WS 路径</label>
+          <input id="nodeFlow" value="xtls-rprx-vision" placeholder="Reality 填 flow，WS TLS 填 /assets/xxxx">
+        </div>
+        <div>
+          <label for="nodePublicKey">Reality 公钥</label>
+          <input id="nodePublicKey" autocomplete="off">
+        </div>
+        <div>
+          <label for="nodeShortId">Reality Short ID</label>
+          <input id="nodeShortId" autocomplete="off">
+        </div>
+        <div class="check-grid full">
+          <label><input id="nodeEnabled" type="checkbox"> 启用这个节点</label>
+          <label><input id="nodeUseResidential" type="checkbox"> 这个节点只做中转，最终走住宅出口</label>
+        </div>
+      </div>
+      <div class="note">不勾选时，这台服务器自己的 IP 就是最终出口；勾选时，会生成“美国静态住宅IP-经-节点名”，适合把 VPS 当中转，最终仍从住宅出口出去。域名方便迁移和 TLS/Reality 伪装，但如果同一个 IP 已被封，单纯换域名不能绕过 IP 封锁。</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>节点列表</h2>
+        <button data-node-action="apply">重新生成配置</button>
+      </div>
+      <div class="node-list" id="nodeList"></div>
+      <div class="note">服务器安装脚本路径：<code id="nodeScriptPath">/data/other_vol/shellcrash-manager/scripts/install-reality-node.sh</code>。复制到新 Debian 10/12 服务器后运行，默认生成 VLESS Reality/XUDP 节点。</div>
+    </section>
+  </main>
+
+  <main class="tab-panel" id="tab-settings">
+    <section>
+      <div class="section-head">
+        <h2>ShellCrash 功能设置</h2>
+        <button data-advanced="saveSettings">保存运行设置</button>
+      </div>
+      <div class="grid">
+        <div>
+          <label for="redirMod">路由模式</label>
+          <select id="redirMod">
+            <option value="混合模式">混合模式</option>
+            <option value="Redir模式">Redir模式</option>
+            <option value="Tproxy模式">Tproxy模式</option>
+            <option value="Tun模式">Tun模式</option>
+            <option value="纯净模式">纯净模式</option>
+          </select>
+        </div>
+        <div>
+          <label for="dnsMod">DNS 模式</label>
+          <select id="dnsMod">
+            <option value="mix">mix</option>
+            <option value="redir_host">redir_host</option>
+            <option value="fake-ip">fake-ip</option>
+            <option value="hosts">hosts</option>
+          </select>
+        </div>
+        <div>
+          <label for="firewallArea">劫持范围</label>
+          <select id="firewallArea">
+            <option value="1">仅局域网流量</option>
+            <option value="2">仅路由器本机流量</option>
+            <option value="3">局域网 + 本机流量</option>
+            <option value="4">不配置流量劫持</option>
+          </select>
+        </div>
+        <div>
+          <label for="startDelay">自启延迟秒数</label>
+          <input id="startDelay" inputmode="numeric" placeholder="0">
+        </div>
+        <div>
+          <label for="dnsPort">DNS 监听端口</label>
+          <input id="dnsPort" inputmode="numeric" placeholder="1053">
+        </div>
+        <div class="check-grid full">
+          <label><input id="skipCert" type="checkbox"> 跳过证书验证</label>
+          <label><input id="sniffer" type="checkbox"> 启用域名嗅探</label>
+          <label><input id="commonPorts" type="checkbox"> 过滤非常用端口</label>
+          <label><input id="quicReject" type="checkbox"> ShellCrash 内置 QUIC 过滤</label>
+          <label><input id="cnIpRoute" type="checkbox"> 中国 IP 绕过内核</label>
+          <label><input id="startOld" type="checkbox"> 保守模式启动</label>
+          <label><input id="networkCheck" type="checkbox"> 自启网络检查</label>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>面板安装</h2>
+        <div class="head-actions">
+          <button data-action="savePanel">保存面板地址</button>
+          <button class="primary" data-action="installPanel">安装 / 覆盖面板</button>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="full">
+          <label for="panelType">面板类型</label>
+          <select id="panelType">
+            <option value="zashboard">zashboard（推荐）</option>
+            <option value="meta_xd">MetaXD</option>
+            <option value="meta_yacd">Yacd-Meta 魔改版</option>
+            <option value="clashdb">基础面板</option>
+            <option value="meta_db">Meta 基础面板</option>
+            <option value="yacd">Yacd</option>
+          </select>
+          <div class="field-tip">面板自己的语言、主题、测速、代理样式等设置，请在面板页面里调整。</div>
+        </div>
+        <div>
+          <label for="panelPort">面板端口</label>
+          <input id="panelPort" inputmode="numeric" value="9999">
+        </div>
+        <div>
+          <label for="panelPath">面板路径</label>
+          <input id="panelPath" value="/ui">
+        </div>
+        <div class="full">
+          <label for="externalUi">面板包地址</label>
+          <input id="externalUi" placeholder="留空表示不修改">
+          <div class="field-tip">一般留空即可；只有需要使用自定义面板包时再填写。</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <main class="tab-panel wide" id="tab-panel">
+    <iframe class="panel-frame" id="panelFrame" title="ShellCrash 面板"></iframe>
+  </main>
+
+  <main class="tab-panel" id="tab-leak">
+    <section>
+      <div class="section-head">
+        <h2>防泄露设置</h2>
+        <button data-advanced="saveLeak">保存并应用防泄露</button>
+      </div>
+      <div class="grid">
+        <div>
+          <label for="lanIface">局域网接口</label>
+          <input id="lanIface" value="br-lan">
+        </div>
+        <div class="check-grid full">
+          <label><input id="blockQuic" type="checkbox"> 阻断 QUIC / HTTP3</label>
+          <label><input id="blockStun" type="checkbox"> 阻断 WebRTC / STUN</label>
+          <label><input id="blockDot" type="checkbox"> 阻断 DoT / DoQ</label>
+          <label><input id="blockIpv6" type="checkbox"> 阻断国外 IPv6 转发</label>
+          <label><input id="excludeChina" type="checkbox"> 中国目的地址不拦截</label>
+        </div>
+      </div>
+      <div class="note">这里是唯一的防泄露应用入口。建议开启“中国目的地址不拦截”，这样国内 App 直连，国外 QUIC、STUN、DoT/DoQ 和 IPv6 会被拦截。</div>
+    </section>
+  </main>
+
+  <main class="tab-panel" id="tab-tasks">
+    <section>
+      <div class="section-head">
+        <h2>任务与自定义命令</h2>
+        <button data-advanced="taskList">刷新任务</button>
+      </div>
+      <div class="note top-note">自定义命令会直接在路由器上执行，不确定含义时建议只使用上方内置按钮。</div>
+      <div class="actions">
+        <button data-built-in="update_scripts">更新管理脚本</button>
+        <button data-built-in="update_core">更新当前内核</button>
+        <button data-built-in="update_mmdb">更新数据库</button>
+        <button data-built-in="reset_firewall">重设防火墙</button>
+        <button data-built-in="hotupdate">热更新配置</button>
+      </div>
+      <div class="grid">
+        <div>
+          <label for="taskName">任务备注</label>
+          <input id="taskName" placeholder="例如：清理缓存">
+        </div>
+        <div>
+          <label for="deleteTaskId">删除任务 ID</label>
+          <input id="deleteTaskId" inputmode="numeric" placeholder="只删除自定义任务">
+        </div>
+        <div class="full">
+          <label for="taskCommand">新增或立即执行的命令</label>
+          <textarea id="taskCommand" rows="4" placeholder="/data/other_vol/ShellCrash/start.sh restart"></textarea>
+        </div>
+      </div>
+      <div class="actions">
+        <button data-advanced="addTask">添加自定义任务</button>
+        <button data-advanced="deleteTask">删除任务</button>
+        <button class="danger" data-advanced="runCustomCommand">立即执行命令</button>
+        <button data-advanced="advancedLog">高级日志</button>
+      </div>
+      <pre id="taskBox">暂无任务列表</pre>
+    </section>
+  </main>
+
+  <main class="tab-panel wide" id="tab-yaml">
+    <section>
+      <div class="section-head">
+        <h2>YAML 高级编辑</h2>
+        <div class="head-actions">
+          <button data-advanced="saveYaml">保存当前 YAML</button>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="full">
+          <label for="yamlFile">文件</label>
+          <select id="yamlFile">
+            <option value="subscription">订阅原始配置 yamls/config.yaml</option>
+            <option value="merged">运行时合并配置 /tmp/ShellCrash/config.yaml（只读）</option>
+            <option value="rules">rules.yaml</option>
+            <option value="proxies">proxies.yaml</option>
+            <option value="groups">proxy-groups.yaml</option>
+            <option value="others">others.yaml</option>
+          </select>
+          <div class="field-tip" id="yamlLine">选择文件后会自动读取；运行时合并配置只能查看，不能保存。</div>
+        </div>
+        <div class="full">
+          <label for="yamlContent">内容</label>
+          <textarea id="yamlContent" rows="18"></textarea>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast"></div>
+  <script src="/app.js"></script>
+  <script src="/nodes.js"></script>
+</body>
+</html>

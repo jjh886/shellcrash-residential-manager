@@ -1,0 +1,2 @@
+MKDIR /data/other_vol/shellcrash-manager
+RUN install.sh
