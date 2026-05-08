@@ -159,11 +159,28 @@ awk \
         sub(/[[:space:]]+$/, "", s)
         return s
     }
+    function unquote(s) {
+        s = trim(s)
+        sub(/[[:space:]]*#.*$/, "", s)
+        gsub(/^[\047"]|[\047"]$/, "", s)
+        return trim(s)
+    }
     function is_plain_target(t) {
-        return t == "DIRECT" || t == "REJECT" || t == "REJECT-DROP" || t == "PASS"
+        return t == "DIRECT" || t == "REJECT" || t == "REJECT-DROP" || t == "REJECT-TINYGIF" || t == "REJECT-DICT" || t == "REJECT-ARRAY" || t == "PASS" || t == "GLOBAL" || t == "COMPATIBLE"
     }
     function is_manager_group(t) {
         return t == res || t == no_self || t == no_res || t == self || t == direct_exit || t == "美国静态住宅IP"
+    }
+    function is_direct_group(t, first, seen, depth) {
+        seen = SUBSEP t SUBSEP
+        while (group_has_proxy[t] && depth++ < 20) {
+            first = group_first_proxy[t]
+            if (is_plain_target(first)) return 1
+            if (!group_has_proxy[first] || index(seen, SUBSEP first SUBSEP)) return 0
+            seen = seen first SUBSEP
+            t = first
+        }
+        return 0
     }
     function yamlq(s) {
         gsub(/\047/, "\047\047", s)
@@ -171,10 +188,84 @@ awk \
     }
     function group_name(line, part) {
         part = line
-        sub(/^.*name:[[:space:]]*/, "", part)
+        sub(/^[[:space:]]*-[[:space:]]*/, "", part)
+        sub(/^\{?[[:space:]]*name:[[:space:]]*/, "", part)
+        sub(/^[[:space:]]*name:[[:space:]]*/, "", part)
         sub(/,[[:space:]].*$/, "", part)
-        gsub(/^[\047"]|[\047"]$/, "", part)
-        return trim(part)
+        return unquote(part)
+    }
+    function remember_group(name) {
+        name = trim(name)
+        if (name == "" || group_seen[name]) return
+        group_seen[name] = 1
+        group_order[++group_count] = name
+    }
+    function remember_proxy(group, item) {
+        item = unquote(item)
+        if (group == "" || item == "") return
+        if (!group_has_proxy[group]) group_first_proxy[group] = item
+        group_has_proxy[group] = 1
+    }
+    function remember_proxy_list(group, list, n, parts, i) {
+        n = split(list, parts, ",")
+        for (i = 1; i <= n; i++) remember_proxy(group, parts[i])
+    }
+    function scan_inline_proxies(group, line, list) {
+        if (group == "" || line !~ /proxies:[[:space:]]*\[/) return 0
+        list = line
+        sub(/^.*proxies:[[:space:]]*\[/, "", list)
+        sub(/\].*$/, "", list)
+        remember_proxy_list(group, list)
+        return 1
+    }
+    function scan_group_line(line, item) {
+        if (line ~ /^proxy-groups:/) {
+            group_section = 1
+            current_group = ""
+            pending_group = 0
+            in_proxy_list = 0
+            return
+        }
+        if (group_section && line ~ /^[A-Za-z0-9_-]+:/ && line !~ /^proxy-groups:/) {
+            group_section = 0
+            current_group = ""
+            pending_group = 0
+            in_proxy_list = 0
+            return
+        }
+        if (!group_section) return
+
+        # 订阅分组格式不统一：这里同时兼容单行对象和多行对象。
+        if (line ~ /^[[:space:]]*-[[:space:]]*$/) {
+            current_group = ""
+            pending_group = 1
+            in_proxy_list = 0
+            return
+        }
+        if (line ~ /^[[:space:]]*-[[:space:]]*\{?[[:space:]]*name:/ || (pending_group && line ~ /^[[:space:]]*name:/)) {
+            current_group = group_name(line)
+            remember_group(current_group)
+            pending_group = 0
+            in_proxy_list = 0
+            scan_inline_proxies(current_group, line)
+            return
+        }
+        if (current_group != "" && line ~ /^[[:space:]]*proxies:[[:space:]]*\[/) {
+            scan_inline_proxies(current_group, line)
+            in_proxy_list = 0
+            return
+        }
+        if (current_group != "" && line ~ /^[[:space:]]*proxies:[[:space:]]*$/) {
+            in_proxy_list = 1
+            return
+        }
+        if (in_proxy_list && line ~ /^[[:space:]]*-[[:space:]]*/) {
+            item = line
+            sub(/^[[:space:]]*-[[:space:]]*/, "", item)
+            remember_proxy(current_group, item)
+            return
+        }
+        if (in_proxy_list && line ~ /^[[:space:]]*[A-Za-z0-9_-]+:/) in_proxy_list = 0
     }
     function rule_target(line, rule, n, parts, target) {
         rule = line
@@ -183,6 +274,7 @@ awk \
         gsub(/^[\047"]|[\047"]$/, "", rule)
         n = split(rule, parts, ",")
         target = ""
+        parts[1] = trim(parts[1])
         if (parts[1] == "AND" || parts[1] == "OR" || parts[1] == "NOT") {
             return ""
         } else if (parts[1] == "MATCH" || parts[1] == "FINAL") {
@@ -236,7 +328,7 @@ awk \
         return before "proxies: [" list "]" after
     }
     function add_front_candidate(t) {
-        if (t == "" || is_plain_target(t) || is_manager_group(t) || front_seen[t]) {
+        if (t == "" || is_plain_target(t) || is_manager_group(t) || is_direct_group(t) || front_seen[t]) {
             return
         }
         front_seen[t] = 1
@@ -244,7 +336,7 @@ awk \
         front_sep = ", "
     }
     function remember_target(t) {
-        if (t == "" || is_plain_target(t) || is_manager_group(t) || direct_only[t]) {
+        if (t == "" || is_plain_target(t) || is_manager_group(t) || is_direct_group(t)) {
             return
         }
         if (!targets[t]) {
@@ -254,23 +346,7 @@ awk \
     }
     {
         lines[NR] = $0
-        if ($0 ~ /^proxies:/) section = "proxies"
-        else if ($0 ~ /^proxy-groups:/) section = "groups"
-        else if ($0 ~ /^rules:/) section = "rules"
-        else if ($0 ~ /^[A-Za-z0-9_-]+:/) section = ""
-
-        if (section == "groups" && $0 ~ /^[[:space:]]*-[[:space:]]*\{?[[:space:]]*name:/ && $0 ~ /proxies:[[:space:]]*\[/) {
-            name = group_name($0)
-            group_order[++group_count] = name
-            list = $0
-            sub(/^.*proxies:[[:space:]]*\[/, "", list)
-            sub(/\].*$/, "", list)
-            clean = list
-            gsub(/[\047" ,]/, "", clean)
-            if (clean ~ /^(DIRECT|REJECT|REJECT-DROP|PASS)+$/) {
-                direct_only[name] = 1
-            }
-        }
+        scan_group_line($0)
     }
     END {
         section = ""
@@ -290,7 +366,7 @@ awk \
         }
         for (j = 1; j <= group_count; j++) {
             target = group_order[j]
-            if (!direct_only[target]) add_front_candidate(target)
+            add_front_candidate(target)
         }
         if (front_list == "") front_list = "DIRECT"
 

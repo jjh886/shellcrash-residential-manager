@@ -1,0 +1,8 @@
+# 本地真实密钥，不提交、不分享、不打进恢复包。
+LOCAL_SECRETS.md
+
+# 运行时数据和备份，里面可能有真实订阅、节点、账号或密码。
+backups/
+custom-nodes.db
+residential-nodes.db
+*.tar.gz
