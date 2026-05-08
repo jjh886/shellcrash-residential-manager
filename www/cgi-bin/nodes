@@ -7,75 +7,26 @@ CUSTOM_NODES_FILE="$APP_DIR/custom-nodes.db"
 NODE_HELPERS="$APP_DIR/scripts/custom_nodes.sh"
 SETUP_SCRIPT="$APP_DIR/scripts/setup-shellcrash-custom.sh"
 LOG_FILE="$APP_DIR/last-nodes.log"
-PARAMS="$QUERY_STRING"
+CGI_COMMON="$APP_DIR/scripts/cgi_common.sh"
 [ -f "$NODE_HELPERS" ] && . "$NODE_HELPERS"
-
-[ "$REQUEST_METHOD" = "POST" ] && [ "${CONTENT_LENGTH:-0}" -gt 0 ] && {
-    PARAMS="$PARAMS&$(dd bs=1 count="$CONTENT_LENGTH" 2>/dev/null)"
-}
-
-send_json() {
-    printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
-    printf '%s\n' "$1"
+[ -f "$CGI_COMMON" ] && . "$CGI_COMMON" || {
+    printf 'Content-Type: application/json\r\n\r\n{"ok":false,"message":"缺少 CGI 公共工具脚本。"}\n'
     exit 0
 }
-
-json_escape() {
-    printf '%s' "$1" | awk '{
-        gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); gsub(/\t/,"\\t"); gsub(/\r/,"")
-        if (NR > 1) printf "\\n"
-        printf "%s", $0
-    }'
-}
-
-urldecode() {
-    local value
-    value=$(printf '%s' "$1" | sed 's/+/ /g; s/%/\\x/g')
-    printf '%b' "$value"
-}
-
-param() {
-    local key="$1" raw
-    raw=$(printf '%s' "$PARAMS" | tr '&' '\n' | sed -n "s/^$key=//p" | tail -n 1)
-    urldecode "$raw"
-}
-
-one_line() {
-    printf '%s' "$1" | tr -d '\r\n'
-}
-
-ok() {
-    local message
-    message=$(json_escape "$1")
-    send_json "{\"ok\":true,\"message\":\"$message\"}"
-}
-
-fail() {
-    local message
-    message=$(json_escape "$1")
-    send_json "{\"ok\":false,\"message\":\"$message\"}"
-}
-
-mask_value() {
-    local value="$1" len=${#value}
-    [ -n "$value" ] || { echo ""; return; }
-    [ "$len" -le 6 ] && { echo "***"; return; }
-    printf '%s***%s' "$(printf '%s' "$value" | cut -c 1-2)" "$(printf '%s' "$value" | sed 's/.*\(..\)$/\1/')"
-}
+cgi_read_params
 
 list_nodes() {
-    local first=1 password_mask
+    local first=1
     printf 'Content-Type: application/json\r\nCache-Control: no-store\r\n\r\n'
     printf '{"ok":true,"nodes":['
     [ -f "$CUSTOM_NODES_FILE" ] && while IFS='|' read -r id enabled name proto server port username password cipher uuid sni flow public_key short_id use_residential; do
         [ -n "$id" ] || continue
-        password_mask=$(json_escape "$(mask_value "$password")")
         [ "$first" = 1 ] || printf ','
         first=0
-        printf '{"id":"%s","enabled":"%s","name":"%s","type":"%s","server":"%s","port":"%s","username":"%s","passwordMasked":"%s","cipher":"%s","uuid":"%s","sni":"%s","flow":"%s","publicKey":"%s","shortId":"%s","useResidential":"%s"}' \
+        printf '{"id":"%s","enabled":"%s","name":"%s","type":"%s","server":"%s","port":"%s","username":"%s","cipher":"%s","uuid":"%s","sni":"%s","flow":"%s","publicKey":"%s","shortId":"%s","useResidential":"%s"}' \
             "$(json_escape "$id")" "$(json_escape "$enabled")" "$(json_escape "$name")" \
             "$(json_escape "$proto")" "$(json_escape "$server")" "$(json_escape "$port")" \
-            "$(json_escape "$username")" "$password_mask" "$(json_escape "$cipher")" \
+            "$(json_escape "$username")" "$(json_escape "$cipher")" \
             "$(json_escape "$uuid")" "$(json_escape "$sni")" "$(json_escape "$flow")" \
             "$(json_escape "$public_key")" "$(json_escape "$short_id")" "$(json_escape "$use_residential")"
     done < "$CUSTOM_NODES_FILE"
@@ -144,18 +95,11 @@ delete_node() {
     ok "自建节点已删除。点击顶部“更新配置”后生效。"
 }
 
-apply_nodes() {
-    [ -x "$SETUP_SCRIPT" ] || fail "没有找到配置生成脚本。"
-    SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >"$LOG_FILE" 2>&1
-    ok "节点配置已重新生成。点击顶部“更新配置”后生效。"
-}
-
 action=$(one_line "$(param action)")
 [ -n "$action" ] || action=list
 case "$action" in
     list) list_nodes ;;
     save) save_node ;;
     delete) delete_node ;;
-    apply) apply_nodes ;;
     *) fail "未知操作。" ;;
 esac

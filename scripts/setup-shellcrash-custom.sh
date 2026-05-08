@@ -76,7 +76,7 @@ write_default_group() {
     [ -z "$res_items" ] && res_items="$isp_nodes"
     [ -n "$res_items" ] && res_items="$res_items, '$NO_RES_NODE'" || res_items="'$NO_RES_NODE'"
     {
-        # 这是“自建节点”里的订阅前置选项，隐藏成内部组，避免面板多一个可操作分组。
+        # 这是“自建节点”里的订阅中转选项，隐藏成内部组，避免面板多一个可操作分组。
         echo "- { name: '$NO_SELF_NODE', type: select, hidden: true, proxies: [$chain_items] }"
         echo "- { name: '$DIRECT_EXIT_NODE', type: select, hidden: true, proxies: [DIRECT] }"
         echo "- { name: '$NO_RES_NODE', type: select, hidden: true, proxies: ['$SELF_GROUP'] }"
@@ -114,15 +114,6 @@ write_default_rules() {
         echo "# shellcrash-manager:proxy-keywords-end"
     } > "$YAML_DIR/rules.yaml"
     chmod 600 "$YAML_DIR/rules.yaml" 2>/dev/null
-}
-
-get_proxy_field() {
-    local field="$1"
-    [ -f "$YAML_DIR/proxies.yaml" ] || return 0
-    case "$field" in
-        port) sed -n "s/.*port: \([0-9][0-9]*\).*/\1/p" "$YAML_DIR/proxies.yaml" | head -n 1 ;;
-        *) sed -n "s/.*$field: '\([^']*\)'.*/\1/p" "$YAML_DIR/proxies.yaml" | head -n 1 ;;
-    esac
 }
 
 install_leak_guard() {
@@ -328,6 +319,10 @@ awk \
     }
 ' "$CONFIG_FILE" > "$tmp" && mv "$tmp" "$CONFIG_FILE"
 
+# ShellCrash 只关闭 DNS IPv6 时，内核仍可能对双栈网站发起 IPv6 连接；
+# 这里跟随管理器默认策略关闭内核 IPv6，避免最终出口显示 IPv6。
+[ "${ipv6_dns:-OFF}" = "OFF" ] && sed -i 's/^ipv6: true$/ipv6: false/' "$CONFIG_FILE"
+
 # 如果封装后的配置无法通过内核校验，立刻回滚到 ShellCrash 原始生成结果。
 if [ -x "$TMPDIR/CrashCore" ]; then
     "$TMPDIR/CrashCore" -t -d "$BINDIR" -f "$CONFIG_FILE" >/dev/null 2>&1 || mv "$backup" "$CONFIG_FILE"
@@ -337,8 +332,22 @@ fi
 EOF
     chmod 755 "$WRAPPER_DST"
 
-    # 清理旧版曾经插到 clash_modify.sh 的运行时补丁；新版只挂在 bfstart.sh 后处理最终配置。
-    [ -f "$MODIFY_FILE" ] && sed -i '/shellcrash-manager:residential-wrapper/d; /residential_runtime_wrapper\.sh/d' "$MODIFY_FILE"
+    # hotupdate 只调用 clash_modify.sh，不经过 bfstart.sh；这里也挂一次，保证热更新会套上封装。
+    if [ -f "$MODIFY_FILE" ]; then
+        sed -i '/shellcrash-manager:residential-runtime-wrapper/d; /shellcrash-manager:residential-wrapper/d; /residential_runtime_wrapper\.sh/d' "$MODIFY_FILE"
+        tmp="$MODIFY_FILE.tmp.$$"
+        awk -v wrapper="$WRAPPER_DST" '
+            {
+                print
+                if (!added && $0 ~ /cut -c 1-.*config\.yaml/) {
+                    print "    # shellcrash-manager:residential-runtime-wrapper"
+                    print "    [ -x \"" wrapper "\" ] && . \"" wrapper "\""
+                    added = 1
+                }
+            }
+        ' "$MODIFY_FILE" > "$tmp" && mv "$tmp" "$MODIFY_FILE"
+        chmod 755 "$MODIFY_FILE" 2>/dev/null
+    fi
 
     [ -f "$BFSTART_FILE" ] || return 0
     grep -q 'residential_runtime_wrapper.sh' "$BFSTART_FILE" && return 0

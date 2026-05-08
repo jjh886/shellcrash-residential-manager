@@ -77,7 +77,7 @@ function renderNodes(nodes = []) {
       </div>
       <div class="node-meta">
         <span>${node.enabled === 'OFF' ? '已停用' : '已启用'}</span>
-        <span>${node.useResidential === 'ON' ? 'ISP 最终出口' : '前置自建节点'}</span>
+        <span>${node.useResidential === 'ON' ? '最终出口 IP' : '中转节点，不作为最终出口'}</span>
       </div>
       <div class="node-actions">
         <button data-node-edit="${node.id}">编辑</button>
@@ -98,8 +98,6 @@ async function runNodeAction(action) {
   if (action === 'save') {
     data = await nodeRequest('save', nodeForm());
     $('nodePassword').value = '';
-  } else if (action === 'apply') {
-    data = await nodeRequest('apply');
   } else if (action === 'clear') {
     clearNodeForm();
     return;
@@ -118,6 +116,8 @@ document.addEventListener('click', async (event) => {
     if (node) editNode(node);
   }
   if (deleteId) {
+    const node = ($('nodeList').nodes || []).find((item) => item.id === deleteId);
+    if (!confirmAction(`确认删除自建节点“${node?.name || deleteId}”吗？`)) return;
     const data = await nodeRequest('delete', { id: deleteId });
     toast(data.message || '节点已删除');
     await loadNodes();

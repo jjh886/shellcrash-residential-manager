@@ -89,7 +89,7 @@
       <div class="actions">
         <button class="primary" data-action="install">安装 / 覆盖安装</button>
         <button data-action="start">启动</button>
-        <button data-action="restart">重启</button>
+        <button data-action="restart">重启服务</button>
         <button class="danger" data-action="stop">停止</button>
       </div>
     </section>
@@ -148,7 +148,7 @@
           <div class="field-tip">适合 AI 或海外服务关键词，命中后会强制走“静态住宅IP”分组。</div>
         </div>
       </div>
-      <div class="note">这里是少量手动补丁，不会再生成大段默认规则；保存后点击顶部“更新配置”才会真正生效。</div>
+      <div class="note">这里只适合补充少量规则；订阅规则不准时再填。保存后点击顶部“更新配置”才会生效。</div>
     </section>
   </main>
 
@@ -193,7 +193,6 @@
     <section>
       <div class="section-head">
         <h2>出口列表</h2>
-        <button data-res-action="apply">重新生成静态住宅配置</button>
       </div>
       <div class="node-list" id="resList"></div>
       <div class="note">新增、编辑、删除出口后，请点击顶部“更新配置”，不用重启 ShellCrash。</div>
@@ -234,49 +233,48 @@
           <input id="nodePort" inputmode="numeric" placeholder="443">
         </div>
         <div>
-          <label for="nodeUsername">账号</label>
+          <label for="nodeUsername">账号（Socks5/HTTP）</label>
           <input id="nodeUsername" autocomplete="off" placeholder="Socks5/HTTP 可填">
         </div>
         <div>
-          <label for="nodePassword">密码</label>
+          <label for="nodePassword">密码（Socks5/HTTP/SS）</label>
           <input id="nodePassword" type="password" autocomplete="off" placeholder="编辑时留空保留旧密码">
         </div>
         <div>
-          <label for="nodeCipher">加密方式</label>
+          <label for="nodeCipher">加密方式（Shadowsocks）</label>
           <input id="nodeCipher" value="aes-128-gcm">
         </div>
         <div>
-          <label for="nodeUuid">UUID</label>
+          <label for="nodeUuid">UUID（VLESS）</label>
           <input id="nodeUuid" autocomplete="off" placeholder="VLESS Reality 使用">
         </div>
         <div>
-          <label for="nodeSni">SNI / 域名</label>
+          <label for="nodeSni">SNI / 域名（VLESS）</label>
           <input id="nodeSni" placeholder="例如 www.example.com">
         </div>
         <div>
-          <label for="nodeFlow">Flow / WS 路径</label>
+          <label for="nodeFlow">Flow / WS 路径（VLESS）</label>
           <input id="nodeFlow" value="xtls-rprx-vision" placeholder="Reality 填 flow，WS TLS 填 /assets/xxxx">
         </div>
         <div>
-          <label for="nodePublicKey">Reality 公钥</label>
+          <label for="nodePublicKey">Reality 公钥（Reality）</label>
           <input id="nodePublicKey" autocomplete="off">
         </div>
         <div>
-          <label for="nodeShortId">Reality Short ID</label>
+          <label for="nodeShortId">Reality Short ID（Reality）</label>
           <input id="nodeShortId" autocomplete="off">
         </div>
         <div class="check-grid full">
           <label><input id="nodeEnabled" type="checkbox"> 启用这个节点</label>
-          <label><input id="nodeUseResidential" type="checkbox"> ISP 作为最终出口</label>
+          <label><input id="nodeUseResidential" type="checkbox"> 这个节点就是最终出口 IP</label>
         </div>
       </div>
-      <div class="note">勾选后，这个节点会出现在“静态住宅IP”分组里，表示它自己就是最终出口；不勾选时，它只作为前置节点。保存后点击顶部“更新配置”才会生效。</div>
+      <div class="note">勾选后，这个节点会出现在“静态住宅IP”分组里，直接作为最终出口；不勾选时，它只作为中转节点。保存后点击顶部“更新配置”才会生效。</div>
     </section>
 
     <section>
       <div class="section-head">
         <h2>节点列表</h2>
-        <button data-node-action="apply">重新生成配置</button>
       </div>
       <div class="node-list" id="nodeList"></div>
       <div class="note">新增、编辑、删除自建节点后，请点击顶部“更新配置”，不用重启 ShellCrash。</div>
@@ -290,6 +288,7 @@
         <h2>ShellCrash 功能设置</h2>
         <button data-advanced="saveSettings">保存运行设置</button>
       </div>
+      <div class="note top-note">不清楚含义时保持默认。路由模式、DNS 模式和劫持范围改错，可能会导致部分设备无法联网。</div>
       <div class="grid">
         <div>
           <label for="redirMod">路由模式</label>
@@ -410,13 +409,13 @@
         <h2>任务与自定义命令</h2>
         <button data-advanced="taskList">刷新任务</button>
       </div>
-      <div class="note top-note">自定义命令会直接在路由器上执行，不确定含义时建议只使用上方内置按钮。</div>
+      <div class="note top-note">这里适合懂 ShellCrash 命令的人使用。自定义命令会直接在路由器上执行，不确定含义时先不要执行。</div>
       <div class="actions">
         <button data-built-in="update_scripts">更新管理脚本</button>
         <button data-built-in="update_core">更新当前内核</button>
         <button data-built-in="update_mmdb">更新数据库</button>
         <button data-built-in="reset_firewall">重设防火墙</button>
-        <button data-built-in="hotupdate">热更新配置</button>
+        <button data-built-in="hotupdate">更新配置</button>
       </div>
       <div class="grid">
         <div>
@@ -461,7 +460,7 @@
             <option value="groups">proxy-groups.yaml</option>
             <option value="others">others.yaml</option>
           </select>
-          <div class="field-tip" id="yamlLine">选择文件后会自动读取；运行时合并配置只能查看，不能保存。</div>
+          <div class="field-tip" id="yamlLine">高级功能：选择文件后会自动读取。保存错误的 YAML 可能导致服务无法启动，不确定时只查看不保存。</div>
         </div>
         <div class="full">
           <label for="yamlContent">内容</label>

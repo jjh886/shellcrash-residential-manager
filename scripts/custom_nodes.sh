@@ -57,23 +57,6 @@ custom_isp_final_node_names_inline() {
     ' "$CUSTOM_NODES_FILE"
 }
 
-emit_custom_residential_yaml() {
-    # 旧版本会为每个自建节点生成“静态住宅IP-经-节点名”。
-    # 现在改为两个总分组控制链路，这里保留空函数避免旧调用报错。
-    return 0
-}
-
-custom_direct_node_names_inline() {
-    [ -f "$CUSTOM_NODES_FILE" ] || return 0
-    awk -F'|' '
-        $2 == "ON" && $3 != "" && $15 != "ON" {
-            gsub(/\047/, "\047\047", $3)
-            printf "%s\047%s\047", sep, $3
-            sep = ", "
-        }
-    ' "$CUSTOM_NODES_FILE"
-}
-
 emit_custom_nodes_yaml() {
     [ -f "$CUSTOM_NODES_FILE" ] || return 0
     while IFS='|' read -r id enabled name proto server port username password cipher uuid sni flow public_key short_id use_residential; do
@@ -90,8 +73,8 @@ emit_custom_nodes_yaml() {
         public_key=$(yaml_quote "$public_key")
         short_id=$(yaml_quote "$short_id")
         dialer=""
-        # 勾选“ISP 作为最终出口”的节点会放进最终出口分组；
-        # 给它加 dialer-proxy 后，就能用“自建节点”分组选择直连、订阅前置或自建前置。
+        # 勾选“这个节点就是最终出口 IP”后，节点会放进最终出口分组；
+        # 给它加 dialer-proxy 后，就能用“自建节点”分组选择直连、订阅中转或自建中转。
         [ "$use_residential" = "ON" ] && dialer=", dialer-proxy: '自建节点'"
 
         case "$proto" in

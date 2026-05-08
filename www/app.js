@@ -36,6 +36,16 @@ function toast(message) {
   box.timer = setTimeout(() => box.classList.remove('show'), 3200);
 }
 
+function confirmAction(message) {
+  // 对会改配置、重启服务或执行命令的操作做二次确认，避免误点。
+  return window.confirm(message);
+}
+
+function commandPreview(command) {
+  const text = String(command || '').trim();
+  return text.length > 120 ? `${text.slice(0, 120)}...` : text;
+}
+
 function pill(text, kind) {
   return `<span class="pill ${kind}">${text}</span>`;
 }
@@ -271,9 +281,12 @@ async function runAdvanced(action) {
     });
     await loadTasks();
   } else if (action === 'deleteTask') {
+    if (!confirmAction(`确认删除任务 ID ${$('deleteTaskId').value || '未填写'} 吗？`)) return;
     data = await advancedRequest('delete_task', { id: $('deleteTaskId').value });
     await loadTasks();
   } else if (action === 'runCustomCommand') {
+    const command = commandPreview($('taskCommand').value);
+    if (!confirmAction(`确认立即在路由器上执行这条命令吗？\n\n${command || '未填写命令'}`)) return;
     data = await advancedRequest('run_custom_command', { command: $('taskCommand').value });
     await showAdvancedLog();
   } else if (action === 'taskList') {
@@ -282,14 +295,12 @@ async function runAdvanced(action) {
   } else if (action === 'advancedLog') {
     await showAdvancedLog();
     return;
-  } else if (action === 'readYaml') {
-    await readYaml();
-    return;
   } else if (action === 'saveYaml') {
     if ($('yamlFile').value === 'merged') {
       toast('运行时合并配置只能查看，不能直接保存');
       return;
     }
+    if (!confirmAction('确认保存当前 YAML 吗？\n\nYAML 缩进或符号写错，可能导致 ShellCrash 无法启动。')) return;
     data = await advancedRequest('save_yaml', {
       file: $('yamlFile').value,
       content: $('yamlContent').value
@@ -306,6 +317,7 @@ async function run(action) {
   try {
     let data;
     if (action === 'install') {
+      if (!confirmAction('确认安装或覆盖安装 ShellCrash 吗？\n\n安装过程会改动 ShellCrash 目录，请确认安装源和目录填写正确。')) return;
       data = await request('install_shellcrash', {
         install_url: $('installUrl').value,
         release: $('release').value,
@@ -330,6 +342,7 @@ async function run(action) {
       data = await request('save_panel', panelForm());
       if (data.ok) setPanelFrame(data.panelUrl);
     } else if (action === 'installPanel') {
+      if (!confirmAction('确认安装或覆盖面板吗？\n\n这会替换当前本地 Dashboard 面板文件。')) return;
       data = await request('save_panel', panelForm());
       if (!data.ok) throw new Error(data.message || '面板地址保存失败');
       setPanelFrame(data.panelUrl);
@@ -337,14 +350,12 @@ async function run(action) {
         panel_type: $('panelType').value,
         ...panelForm()
       });
-    } else if (action === 'refreshPanel') {
-      setPanelFrame(panelUrl);
-      data = { ok: true, message: '面板已刷新' };
     } else if (action === 'hotupdate') {
       data = await advancedRequest('run_builtin', { cmd: 'hotupdate' });
     } else if (action === 'test') {
       data = await testExit(false);
     } else {
+      if ((action === 'stop' || action === 'restart') && !confirmAction(`确认${action === 'stop' ? '停止' : '重启'} ShellCrash 服务吗？`)) return;
       const map = { updateSub: 'update_subscription' };
       data = await request(map[action] || action, action === 'updateSub' ? {
         subscription_url: $('subscription').value
@@ -353,7 +364,7 @@ async function run(action) {
     toast(data.message || (data.ok ? '操作完成' : '操作失败'));
     await refresh();
   } catch (err) {
-    toast('请求失败：' + err.message);
+    toast('操作没有成功：' + err.message);
   } finally {
     busy = false;
     document.querySelectorAll('button').forEach((btn) => btn.disabled = false);
@@ -369,6 +380,14 @@ document.addEventListener('click', (event) => {
   if (tab) showTab(tab);
   else if (advanced) runAdvanced(advanced);
   else if (builtIn) {
+    const names = {
+      update_scripts: '更新管理脚本',
+      update_core: '更新当前内核',
+      update_mmdb: '更新数据库',
+      reset_firewall: '重设防火墙',
+      hotupdate: '更新配置'
+    };
+    if (!confirmAction(`确认执行“${names[builtIn] || builtIn}”吗？`)) return;
     advancedRequest('run_builtin', { cmd: builtIn }).then(async (data) => {
       toast(data.message || '命令已执行');
       await showAdvancedLog();

@@ -78,8 +78,6 @@ async function runResidential(action) {
   if (action === 'save') {
     data = await residentialRequest('save', residentialForm());
     $('resPassword').value = '';
-  } else if (action === 'apply') {
-    data = await residentialRequest('apply');
   } else if (action === 'clear') {
     clearResidentialForm();
     return;
@@ -99,6 +97,8 @@ document.addEventListener('click', async (event) => {
     if (node) editResidential(node);
   }
   if (deleteId) {
+    const node = ($('resList').nodes || []).find((item) => item.id === deleteId);
+    if (!confirmAction(`确认删除静态住宅出口“${node?.name || deleteId}”吗？`)) return;
     const data = await residentialRequest('delete', { id: deleteId });
     toast(data.message || '静态住宅出口已删除');
     await loadResidential();
