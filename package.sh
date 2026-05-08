@@ -11,6 +11,7 @@ tar -czf "$OUT" \
   --exclude 'shellcrash-residential-manager/.git' \
   --exclude 'shellcrash-residential-manager/.gitignore' \
   --exclude 'shellcrash-residential-manager/backups' \
+  --exclude 'shellcrash-residential-manager/artifacts' \
   --exclude 'shellcrash-residential-manager/HANDOFF.md' \
   --exclude 'shellcrash-residential-manager/LOCAL_SECRETS.md' \
   --exclude 'shellcrash-residential-manager/SERVER_NODE_INSTALL.md' \

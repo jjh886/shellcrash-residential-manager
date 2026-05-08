@@ -1,6 +1,6 @@
 #!/bin/ash
 # 代理分组小工具：从订阅 YAML 里提取可作为前置链路的分组名。
-# 调用方可提前设置 SELF_GROUP、RES_GROUP、NO_RES_NODE、NO_SELF_NODE、DIRECT_EXIT_NODE。
+# 调用方可提前设置 SELF_GROUP、RES_GROUP、NO_RES_NODE、NO_SELF_NODE、DIRECT_EXIT_NODE 和自动分组名。
 
 subscription_group_names_inline() {
     local file="$1"
@@ -10,7 +10,9 @@ subscription_group_names_inline() {
         -v res="${RES_GROUP:-静态住宅IP}" \
         -v nores="${NO_RES_NODE:-不使用静态住宅IP}" \
         -v noself="${NO_SELF_NODE:-使用订阅节点}" \
-        -v direct_exit="${DIRECT_EXIT_NODE:-直接使用静态住宅IP}" '
+        -v direct_exit="${DIRECT_EXIT_NODE:-直接使用静态住宅IP}" \
+        -v auto_res="${AUTO_RES_NODE:-自动住宅出口}" \
+        -v auto_self="${AUTO_SELF_NODE:-自动前置链路}" '
         function trim(s) {
             sub(/^[[:space:]]+/, "", s)
             sub(/[[:space:]]+$/, "", s)
@@ -27,7 +29,7 @@ subscription_group_names_inline() {
             return "\047" s "\047"
         }
         function manager_group(name) {
-            return name == self || name == res || name == nores || name == noself || name == direct_exit || name == "美国静态住宅IP"
+            return name == self || name == res || name == nores || name == noself || name == direct_exit || name == auto_res || name == auto_self || name == "美国静态住宅IP"
         }
         function plain_target(name) {
             return name == "DIRECT" || name == "REJECT" || name == "REJECT-DROP" || name == "REJECT-TINYGIF" || name == "REJECT-DICT" || name == "REJECT-ARRAY" || name == "PASS" || name == "GLOBAL" || name == "COMPATIBLE"

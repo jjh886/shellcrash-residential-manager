@@ -22,6 +22,9 @@ NO_RES_NODE="不使用静态住宅IP"
 SELF_GROUP="自建节点"
 NO_SELF_NODE="使用订阅节点"
 DIRECT_EXIT_NODE="直接使用静态住宅IP"
+AUTO_RES_NODE="自动住宅出口"
+AUTO_SELF_NODE="自动前置链路"
+HEALTH_CHECK_URL="https://www.gstatic.com/generate_204"
 [ -f "$RULE_HELPERS" ] && . "$RULE_HELPERS"
 [ -f "$NODE_HELPERS" ] && . "$NODE_HELPERS"
 [ -f "$RES_HELPERS" ] && . "$RES_HELPERS"
@@ -64,23 +67,31 @@ EOF
 }
 
 write_default_group() {
-    local custom_nodes isp_nodes residential_nodes chain_items self_items res_items
+    local custom_nodes isp_nodes residential_nodes chain_items self_items res_items final_items auto_self_items
     custom_nodes=$(custom_node_names_inline)
     isp_nodes=$(custom_isp_final_node_names_inline)
     residential_nodes=$(residential_node_names_inline)
     chain_items=$(subscription_group_names_inline "$YAML_DIR/config.yaml")
-    self_items="'$NO_SELF_NODE', '$DIRECT_EXIT_NODE'"
+    auto_self_items="'$DIRECT_EXIT_NODE'"
+    [ -n "$custom_nodes" ] && auto_self_items="$auto_self_items, $custom_nodes"
+    auto_self_items="$auto_self_items, '$NO_SELF_NODE'"
+    self_items="'$AUTO_SELF_NODE', '$DIRECT_EXIT_NODE'"
     [ -n "$custom_nodes" ] && self_items="$self_items, $custom_nodes"
-    res_items="$residential_nodes"
-    [ -n "$res_items" ] && [ -n "$isp_nodes" ] && res_items="$res_items, $isp_nodes"
-    [ -z "$res_items" ] && res_items="$isp_nodes"
-    [ -n "$res_items" ] && res_items="$res_items, '$NO_RES_NODE'" || res_items="'$NO_RES_NODE'"
+    self_items="$self_items, '$NO_SELF_NODE'"
+    final_items="$residential_nodes"
+    [ -n "$final_items" ] && [ -n "$isp_nodes" ] && final_items="$final_items, $isp_nodes"
+    [ -z "$final_items" ] && final_items="$isp_nodes"
+    [ -n "$final_items" ] && res_items="'$AUTO_RES_NODE', $final_items, '$NO_RES_NODE'" || res_items="'$NO_RES_NODE'"
     {
         # 这是“自建节点”里的订阅中转选项，隐藏成内部组，避免面板多一个可操作分组。
         echo "- { name: '$NO_SELF_NODE', type: select, hidden: true, proxies: [$chain_items] }"
         echo "- { name: '$DIRECT_EXIT_NODE', type: select, hidden: true, proxies: [DIRECT] }"
+        # 自动前置只负责“怎么连到住宅出口”：直连优先，再自建中转，最后订阅中转。
+        echo "- { name: '$AUTO_SELF_NODE', type: fallback, hidden: true, url: '$HEALTH_CHECK_URL', interval: 300, proxies: [$auto_self_items] }"
         echo "- { name: '$NO_RES_NODE', type: select, hidden: true, proxies: ['$SELF_GROUP'] }"
         echo "- { name: '$SELF_GROUP', type: select, proxies: [$self_items] }"
+        # 自动住宅出口只放最终住宅/ISP 节点，避免自动兜底到非住宅 IP。
+        [ -n "$final_items" ] && echo "- { name: '$AUTO_RES_NODE', type: fallback, hidden: true, url: '$HEALTH_CHECK_URL', interval: 300, proxies: [$final_items] }"
         cat <<EOF
 # 静态住宅IP分组：订阅更新不会覆盖这里。
 - { name: '$RES_GROUP', type: select, proxies: [$res_items] }
@@ -140,6 +151,8 @@ NO_SELF_NODE="使用订阅节点"
 NO_RES_NODE="不使用静态住宅IP"
 SELF_GROUP="自建节点"
 DIRECT_EXIT_NODE="直接使用静态住宅IP"
+AUTO_RES_NODE="自动住宅出口"
+AUTO_SELF_NODE="自动前置链路"
 CONFIG_FILE="$TMPDIR/config.yaml"
 
 [ -s "$CONFIG_FILE" ] || return 0
@@ -153,7 +166,9 @@ awk \
     -v no_self="$NO_SELF_NODE" \
     -v no_res="$NO_RES_NODE" \
     -v self="$SELF_GROUP" \
-    -v direct_exit="$DIRECT_EXIT_NODE" '
+    -v direct_exit="$DIRECT_EXIT_NODE" \
+    -v auto_res="$AUTO_RES_NODE" \
+    -v auto_self="$AUTO_SELF_NODE" '
     function trim(s) {
         sub(/^[[:space:]]+/, "", s)
         sub(/[[:space:]]+$/, "", s)
@@ -169,7 +184,7 @@ awk \
         return t == "DIRECT" || t == "REJECT" || t == "REJECT-DROP" || t == "REJECT-TINYGIF" || t == "REJECT-DICT" || t == "REJECT-ARRAY" || t == "PASS" || t == "GLOBAL" || t == "COMPATIBLE"
     }
     function is_manager_group(t) {
-        return t == res || t == no_self || t == no_res || t == self || t == direct_exit || t == "美国静态住宅IP"
+        return t == res || t == no_self || t == no_res || t == self || t == direct_exit || t == auto_res || t == auto_self || t == "美国静态住宅IP"
     }
     function is_direct_group(t, first, seen, depth) {
         seen = SUBSEP t SUBSEP
@@ -405,6 +420,10 @@ if [ -x "$TMPDIR/CrashCore" ]; then
 else
     rm -f "$backup"
 fi
+
+# 如果配置了客户端订阅发布，运行时配置每次生成后都会自动同步到公网服务器。
+PUBLISH_SCRIPT="/data/other_vol/shellcrash-manager/scripts/client_subscription_publish.sh"
+[ -x "$PUBLISH_SCRIPT" ] && ( "$PUBLISH_SCRIPT" "$CONFIG_FILE" >/dev/null 2>&1 & )
 EOF
     chmod 755 "$WRAPPER_DST"
 
