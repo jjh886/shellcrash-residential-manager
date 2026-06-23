@@ -9,10 +9,15 @@ RULES_FILE="$YAML_DIR/rules.yaml"
 LEAK_GUARD="$BASE/task/block_proxy_leaks.sh"
 SETUP_SCRIPT="$APP_DIR/scripts/setup-shellcrash-custom.sh"
 INSTALL_SCRIPT="$APP_DIR/scripts/shellcrash-auto-install.sh"
+PUBLISH_SCRIPT="$APP_DIR/scripts/client_subscription_publish.sh"
+CLIENT_SUB_LOG="$APP_DIR/last-client-subscription.log"
+RUNTIME_CONFIG="/tmp/ShellCrash/config.yaml"
 RULE_HELPERS="$APP_DIR/scripts/rule_helpers.sh"
 CGI_COMMON="$APP_DIR/scripts/cgi_common.sh"
 BACKUP_DIR="$APP_DIR/backups"
 RES_GROUP="静态住宅IP"
+JP_RULE_GROUP="日本专用节点"
+DEFAULT_ROUTER_IP=${MANAGER_ROUTER_IP:-192.168.0.1}
 [ -f "$RULE_HELPERS" ] && . "$RULE_HELPERS"
 [ -f "$CGI_COMMON" ] && . "$CGI_COMMON" || {
     printf 'Content-Type: application/json\r\n\r\n{"ok":false,"message":"缺少 CGI 公共工具脚本。"}\n'
@@ -82,11 +87,20 @@ ensure_shellcrash_flags() {
     set_cfg_plain ipv6_dns OFF
     set_cfg_plain cn_ip_route ON
 }
+publish_client_subscription() {
+    # 公网客户端订阅是给电脑、手机和其他路由器用的，更新后同步跑一遍，避免远端还停在旧规则。
+    [ -x "$PUBLISH_SCRIPT" ] || {
+        echo "客户端订阅发布脚本不存在，已跳过公网同步。" > "$CLIENT_SUB_LOG"
+        return 0
+    }
+    "$PUBLISH_SCRIPT" "$RUNTIME_CONFIG" > "$CLIENT_SUB_LOG" 2>&1
+}
 write_rules_file() {
     local direct_domains="$1"
     local proxy_domains="$2"
     local direct_keywords="$3"
     local proxy_keywords="$4"
+    local jp_domains="$5"
     mkdir -p "$YAML_DIR"
     backup_file "$RULES_FILE"
     {
@@ -97,6 +111,14 @@ write_rules_file() {
         echo "# shellcrash-manager:direct-keywords-begin"
         emit_keyword_rules "$direct_keywords" DIRECT
         echo "# shellcrash-manager:direct-keywords-end"
+        echo "# shellcrash-manager:jp-domains-begin"
+        emit_domain_rules "$jp_domains" "$JP_RULE_GROUP"
+        echo "# shellcrash-manager:jp-domains-end"
+        echo "# shellcrash-manager:jp-keywords-begin"
+        emit_keyword_rules "bycsi
+bybit
+bytick" "$JP_RULE_GROUP"
+        echo "# shellcrash-manager:jp-keywords-end"
         echo "# shellcrash-manager:proxy-domains-begin"
         emit_domain_rules "$proxy_domains" "$RES_GROUP"
         echo "# shellcrash-manager:proxy-domains-end"
@@ -116,8 +138,17 @@ manager_running() {
     ps w 2>/dev/null | grep -q '[u]httpd .*shellcrash-manager/www'
 }
 
+router_host() {
+    local host
+    # CGI 会带上浏览器访问管理页时的 Host，优先复用它，避免 LAN 地址改动后还残留旧地址。
+    host=$(printf '%s' "${HTTP_HOST:-}" | cut -d: -f1)
+    [ -n "$host" ] || host="$DEFAULT_ROUTER_IP"
+    printf '%s\n' "$host"
+}
+
 panel_info() {
     local raw parsed
+    ROUTER_HOST=$(router_host)
     PANEL_PORT=$(get_cfg_value db_port)
     PANEL_PATH=/ui
     [ -n "$PANEL_PORT" ] || PANEL_PORT=9999
@@ -129,15 +160,16 @@ panel_info() {
     elif echo "$raw" | grep -q '^/'; then
         PANEL_PATH="$raw"
     fi
-    PANEL_URL="http://192.168.31.1:${PANEL_PORT}${PANEL_PATH}/"
+    PANEL_URL="http://${ROUTER_HOST}:${PANEL_PORT}${PANEL_PATH}/"
 }
 status_json() {
-    local version panel_raw_j panel_url_j panel_path_j direct_j proxy_j direct_kw_j proxy_kw_j res_count proxy_domains proxy_keywords
+    local version panel_raw_j panel_url_j panel_path_j direct_j proxy_j direct_kw_j proxy_kw_j jp_j res_count proxy_domains proxy_keywords ui_url_j
     version=$(get_cfg_value versionsh_l)
     panel_info
     panel_raw_j=$(json_escape "$(get_cfg_value hostdir)")
     panel_url_j=$(json_escape "$PANEL_URL")
     panel_path_j=$(json_escape "$PANEL_PATH")
+    ui_url_j=$(json_escape "http://${ROUTER_HOST}:19999/")
     direct_j=$(json_escape "$(extract_domains direct-domains DIRECT)")
     proxy_domains=$(extract_domains proxy-domains "$RES_GROUP")
     [ -n "$proxy_domains" ] || proxy_domains=$(extract_domains proxy-domains "美国静态住宅IP")
@@ -146,16 +178,17 @@ status_json() {
     proxy_keywords=$(extract_keywords proxy-keywords "$RES_GROUP")
     [ -n "$proxy_keywords" ] || proxy_keywords=$(extract_keywords proxy-keywords "美国静态住宅IP")
     proxy_kw_j=$(json_escape "$proxy_keywords")
+    jp_j=$(json_escape "$(extract_domains jp-domains "$JP_RULE_GROUP")")
     shellcrash_running && running=true || running=false
     manager_running && manager=true || manager=false
     guard_active && guard=true || guard=false
     cfg_has_subscription && sub=true || sub=false
     res_count=$(awk -F'|' '$2 == "ON" {n++} END {print n+0}' "$APP_DIR/residential-nodes.db" 2>/dev/null)
     [ -x "$BASE/start.sh" ] && installed=true || installed=false
-    send_json "{\"ok\":true,\"installed\":$installed,\"shellcrashRunning\":$running,\"managerRunning\":$manager,\"guardActive\":$guard,\"subscriptionConfigured\":$sub,\"version\":\"$version\",\"crashDir\":\"$BASE\",\"panel\":\"$panel_raw_j\",\"panelUrl\":\"$panel_url_j\",\"panelPort\":\"$PANEL_PORT\",\"panelPath\":\"$panel_path_j\",\"rules\":{\"directDomains\":\"$direct_j\",\"proxyDomains\":\"$proxy_j\",\"directKeywords\":\"$direct_kw_j\",\"proxyKeywords\":\"$proxy_kw_j\"},\"residential\":{\"count\":$res_count},\"uiUrl\":\"http://192.168.31.1:19999/\"}"
+    send_json "{\"ok\":true,\"installed\":$installed,\"shellcrashRunning\":$running,\"managerRunning\":$manager,\"guardActive\":$guard,\"subscriptionConfigured\":$sub,\"version\":\"$version\",\"crashDir\":\"$BASE\",\"panel\":\"$panel_raw_j\",\"panelUrl\":\"$panel_url_j\",\"panelPort\":\"$PANEL_PORT\",\"panelPath\":\"$panel_path_j\",\"rules\":{\"directDomains\":\"$direct_j\",\"proxyDomains\":\"$proxy_j\",\"directKeywords\":\"$direct_kw_j\",\"proxyKeywords\":\"$proxy_kw_j\",\"jpDomains\":\"$jp_j\"},\"residential\":{\"count\":$res_count},\"uiUrl\":\"$ui_url_j\"}"
 }
 save_config() {
-    local scope subscription direct_domains proxy_domains direct_keywords proxy_keywords
+    local scope subscription direct_domains proxy_domains direct_keywords proxy_keywords jp_domains
     scope=$(one_line "$(param scope)")
     [ -n "$scope" ] || scope=all
     case "$scope" in all|subscription|rules) ;; *) fail "未知保存范围。" ;; esac
@@ -192,8 +225,13 @@ save_config() {
         proxy_keywords=$(extract_keywords proxy-keywords "$RES_GROUP")
         [ -n "$proxy_keywords" ] || proxy_keywords=$(extract_keywords proxy-keywords "美国静态住宅IP")
     fi
+    if has_param jp_domains; then
+        jp_domains=$(normalize_domains "$(param jp_domains)")
+    else
+        jp_domains=$(extract_domains jp-domains "$JP_RULE_GROUP")
+    fi
     if [ "$scope" = "rules" ]; then
-        write_rules_file "$direct_domains" "$proxy_domains" "$direct_keywords" "$proxy_keywords"
+        write_rules_file "$direct_domains" "$proxy_domains" "$direct_keywords" "$proxy_keywords" "$jp_domains"
         [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
         ok "分流网站已保存。点击顶部“更新配置”后生效。"
     fi
@@ -204,7 +242,7 @@ save_config() {
     }
     ensure_shellcrash_flags
     [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
-    write_rules_file "$direct_domains" "$proxy_domains" "$direct_keywords" "$proxy_keywords"
+    write_rules_file "$direct_domains" "$proxy_domains" "$direct_keywords" "$proxy_keywords" "$jp_domains"
     ok "已保存。点击顶部“更新配置”后生效。"
 }
 get_subscription() {
@@ -228,7 +266,8 @@ update_subscription() {
     "$BASE/task/task.sh" update_config >"$APP_DIR/last-update.log" 2>&1
     [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT" >/dev/null 2>&1
     [ -x "$LEAK_GUARD" ] && "$LEAK_GUARD" >/dev/null 2>&1
-    ok "订阅更新完成，静态住宅出口配置仍然保留。"
+    publish_client_subscription || fail "订阅更新完成，但同步到公网客户端订阅失败。请到高级日志或 last-client-subscription.log 查看原因。"
+    ok "订阅更新完成，静态住宅出口配置仍然保留，公网客户端订阅也已同步。"
 }
 control_shellcrash() {
     local op="$1"
@@ -257,7 +296,7 @@ install_shellcrash() {
     ok "已开始安装或覆盖安装 ShellCrash，日志会实时写入安装日志。"
 }
 save_panel() {
-    local panel_port panel_path ui_url panel_url panel_url_j
+    local panel_port panel_path ui_url panel_url panel_url_j host
     require_shellcrash
     panel_port=$(one_line "$(param panel_port)")
     panel_path=$(one_line "$(param panel_path)")
@@ -272,7 +311,8 @@ save_panel() {
     set_cfg_plain db_port "$panel_port"
     set_cfg_quoted hostdir ":$panel_port$panel_path"
     [ -n "$ui_url" ] && set_cfg_plain external_ui_url "$ui_url"
-    panel_url="http://192.168.31.1:${panel_port}${panel_path}/"
+    host=$(router_host)
+    panel_url="http://${host}:${panel_port}${panel_path}/"
     panel_url_j=$(json_escape "$panel_url")
     send_json "{\"ok\":true,\"message\":\"面板地址已保存。点击顶部“更新配置”后生效。\",\"panelUrl\":\"$panel_url_j\"}"
 }

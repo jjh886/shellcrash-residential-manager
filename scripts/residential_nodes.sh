@@ -33,7 +33,9 @@ res_find_node_line() {
 ensure_residential_nodes() {
     local old_file="$1"
     local server port username password
-    [ -s "$RESIDENTIAL_NODES_FILE" ] && return 0
+    # 只在首次安装、数据库文件不存在时迁移旧配置。
+    # 如果文件存在但为空，表示用户已经删除了全部住宅出口，不能再从旧 YAML 里复活。
+    [ -e "$RESIDENTIAL_NODES_FILE" ] && return 0
 
     server=$(sed -n "s/.*server: '\([^']*\)'.*/\1/p" "$old_file" 2>/dev/null | head -n 1)
     port=$(sed -n "s/.*port: \([0-9][0-9]*\).*/\1/p" "$old_file" 2>/dev/null | head -n 1)

@@ -12,12 +12,22 @@ tar -czf "$OUT" \
   --exclude 'shellcrash-residential-manager/.gitignore' \
   --exclude 'shellcrash-residential-manager/backups' \
   --exclude 'shellcrash-residential-manager/artifacts' \
+  --exclude 'shellcrash-residential-manager/AGENTS.md' \
+  --exclude 'shellcrash-residential-manager/CLAUDE.md' \
   --exclude 'shellcrash-residential-manager/HANDOFF.md' \
   --exclude 'shellcrash-residential-manager/LOCAL_SECRETS.md' \
   --exclude 'shellcrash-residential-manager/SERVER_NODE_INSTALL.md' \
   --exclude 'shellcrash-residential-manager/README.md' \
+  --exclude 'shellcrash-residential-manager/package.sh' \
+  --exclude 'shellcrash-residential-manager/start_script' \
   --exclude 'shellcrash-residential-manager/custom-nodes.db' \
   --exclude 'shellcrash-residential-manager/residential-nodes.db' \
+  --exclude 'shellcrash-residential-manager/client-subscription.env' \
+  --exclude 'shellcrash-residential-manager/client-subscriptions' \
+  --exclude 'shellcrash-residential-manager/last-*.log' \
+  --exclude 'shellcrash-residential-manager/uhttpd.log' \
+  --exclude 'shellcrash-residential-manager/uhttpd.pid' \
+  --exclude 'shellcrash-residential-manager/leak-guard.conf.bak.*' \
   --exclude 'shellcrash-residential-manager/scripts/install-reality-node.sh' \
   --exclude 'shellcrash-residential-manager/scripts/install-static-node.sh' \
   --exclude 'shellcrash-residential-manager/*.tar.gz' \

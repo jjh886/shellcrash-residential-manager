@@ -5,6 +5,7 @@
 SRC_DIR=$(cd "$(dirname "$0")" && pwd)
 TARGET_DIR=${TARGET_DIR:-/data/other_vol/shellcrash-manager}
 START_SCRIPT="$TARGET_DIR/scripts/residential-ui-start.sh"
+LAN_SCRIPT="$TARGET_DIR/scripts/configure-router-lan.sh"
 
 copy_manager_files() {
     mkdir -p "$TARGET_DIR"
@@ -25,12 +26,41 @@ setup_firewall_autostart() {
     uci commit firewall
 }
 
+setup_shellcrash_custom() {
+    [ -x "$TARGET_DIR/scripts/setup-shellcrash-custom.sh" ] || return 0
+    "$TARGET_DIR/scripts/setup-shellcrash-custom.sh" >/dev/null 2>&1
+}
+
+configure_router_lan() {
+    local code
+
+    [ -x "$LAN_SCRIPT" ] || return 0
+    MANAGER_START_SCRIPT="$START_SCRIPT" "$LAN_SCRIPT"
+    code=$?
+    case "$code" in
+        0) return 0 ;;
+        2) return 2 ;;
+        *) return "$code" ;;
+    esac
+}
+
 copy_manager_files
 setup_firewall_autostart
-"$START_SCRIPT" restart
+setup_shellcrash_custom
 
-if [ -x "$TARGET_DIR/scripts/setup-shellcrash-custom.sh" ]; then
-    "$TARGET_DIR/scripts/setup-shellcrash-custom.sh" >/dev/null 2>&1
-fi
+configure_router_lan
+lan_status=$?
+case "$lan_status" in
+    0)
+        "$START_SCRIPT" restart
+        ;;
+    2)
+        # LAN 地址切换会断开当前连接，管理页会在网络重启后由临时脚本拉起。
+        ;;
+    *)
+        echo "路由器 LAN/DHCP 配置失败，已停止安装。"
+        exit "$lan_status"
+        ;;
+esac
 
-echo "ShellCrash 管理器已安装：http://192.168.31.1:19999/"
+echo "ShellCrash 管理器已安装：http://192.168.0.1:19999/"

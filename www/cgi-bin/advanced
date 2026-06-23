@@ -9,6 +9,8 @@ LOG_FILE="$APP_DIR/last-advanced.log"
 BACKUP_DIR="$APP_DIR/backups"
 CGI_COMMON="$APP_DIR/scripts/cgi_common.sh"
 SETUP_SCRIPT="$APP_DIR/scripts/setup-shellcrash-custom.sh"
+PUBLISH_SCRIPT="$APP_DIR/scripts/client_subscription_publish.sh"
+RUNTIME_CONFIG="/tmp/ShellCrash/config.yaml"
 [ -f "$CGI_COMMON" ] && . "$CGI_COMMON" || {
     printf 'Content-Type: application/json\r\n\r\n{"ok":false,"message":"缺少 CGI 公共工具脚本。"}\n'
     exit 0
@@ -206,6 +208,15 @@ EOF
     ok "防泄露设置已保存并重新应用。"
 }
 
+publish_client_subscription() {
+    # 热更新后顺手同步公网订阅，让其他客户端拿到和路由器一致的规则。
+    [ -x "$PUBLISH_SCRIPT" ] || {
+        echo "客户端订阅发布脚本不存在，已跳过公网同步。"
+        return 0
+    }
+    "$PUBLISH_SCRIPT" "$RUNTIME_CONFIG"
+}
+
 run_builtin() {
     local cmd
     cmd=$(one_line "$(param cmd)")
@@ -217,7 +228,17 @@ run_builtin() {
         update_core) ( "$BASE/task/task.sh" update_core >"$LOG_FILE" 2>&1 ) & ;;
         update_mmdb) ( "$BASE/task/task.sh" update_mmdb >"$LOG_FILE" 2>&1 ) & ;;
         reset_firewall) ( "$BASE/task/task.sh" reset_firewall >"$LOG_FILE" 2>&1 ) & ;;
-        hotupdate) ( "$BASE/task/task.sh" hotupdate >"$LOG_FILE" 2>&1 ) & ;;
+        hotupdate)
+            (
+                "$BASE/task/task.sh" hotupdate
+                rc=$?
+                if [ "$rc" -eq 0 ]; then
+                    [ -x "$SETUP_SCRIPT" ] && SHELLCRASH_HOME="$BASE" "$SETUP_SCRIPT"
+                    publish_client_subscription
+                fi
+                exit "$rc"
+            ) >"$LOG_FILE" 2>&1 &
+            ;;
         *) fail "未知内置命令。" ;;
     esac
     [ "$cmd" = "hotupdate" ] && ok "配置更新已开始，稍等几秒后生效。"

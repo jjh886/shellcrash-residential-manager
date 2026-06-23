@@ -1,9 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const api = '/cgi-bin/api';
 const advancedApi = '/cgi-bin/advanced';
+const defaultRouterHost = window.location.hostname || '192.168.0.1';
 let busy = false;
 let yamlLoadedFile = '';
-let panelUrl = 'http://192.168.31.1:9999/ui/';
+let panelUrl = `http://${defaultRouterHost}:9999/ui/`;
 
 function formBody(data) {
   return Object.keys(data).map((key) => (
@@ -54,6 +55,7 @@ function renderStatus(data) {
   $('pathLine').textContent = `目录：${data.crashDir || '--'} ｜ 管理页：${data.uiUrl}`;
   $('installDir').value = data.crashDir || $('installDir').value;
   $('directDomains').value = data.rules?.directDomains || '';
+  $('jpDomains').value = data.rules?.jpDomains || '';
   $('proxyDomains').value = data.rules?.proxyDomains || '';
   $('directKeywords').value = data.rules?.directKeywords || '';
   $('proxyKeywords').value = data.rules?.proxyKeywords || '';
@@ -213,7 +215,8 @@ function panelForm() {
 }
 
 function setPanelFrame(url) {
-  panelUrl = url || `http://192.168.31.1:${$('panelPort').value || 9999}${$('panelPath').value || '/ui'}/`;
+  // 优先使用当前打开管理页的主机名，避免以后换 LAN 地址时还要改前端代码。
+  panelUrl = url || `http://${defaultRouterHost}:${$('panelPort').value || 9999}${$('panelPath').value || '/ui'}/`;
   $('panelFrame').src = panelUrl;
 }
 
@@ -334,6 +337,7 @@ async function run(action) {
       data = await request('save', {
         scope: 'rules',
         direct_domains: $('directDomains').value,
+        jp_domains: $('jpDomains').value,
         proxy_domains: $('proxyDomains').value,
         direct_keywords: $('directKeywords').value,
         proxy_keywords: $('proxyKeywords').value

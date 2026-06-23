@@ -24,6 +24,8 @@ NO_SELF_NODE="使用订阅节点"
 DIRECT_EXIT_NODE="直接使用静态住宅IP"
 AUTO_RES_NODE="自动住宅出口"
 AUTO_SELF_NODE="自动前置链路"
+JP_RULE_GROUP="日本专用节点"
+JP_SUB_GROUP="🇯🇵日本节点"
 HEALTH_CHECK_URL="https://www.gstatic.com/generate_204"
 [ -f "$RULE_HELPERS" ] && . "$RULE_HELPERS"
 [ -f "$NODE_HELPERS" ] && . "$NODE_HELPERS"
@@ -67,11 +69,12 @@ EOF
 }
 
 write_default_group() {
-    local custom_nodes isp_nodes residential_nodes chain_items self_items res_items final_items auto_self_items
+    local custom_nodes isp_nodes residential_nodes chain_items self_items res_items final_items auto_self_items jp_items
     custom_nodes=$(custom_node_names_inline)
     isp_nodes=$(custom_isp_final_node_names_inline)
     residential_nodes=$(residential_node_names_inline)
     chain_items=$(subscription_group_names_inline "$YAML_DIR/config.yaml")
+    case "$chain_items" in *"'$JP_SUB_GROUP'"*) jp_items="'$JP_SUB_GROUP'" ;; *) jp_items="DIRECT" ;; esac
     auto_self_items="'$DIRECT_EXIT_NODE'"
     [ -n "$custom_nodes" ] && auto_self_items="$auto_self_items, $custom_nodes"
     auto_self_items="$auto_self_items, '$NO_SELF_NODE'"
@@ -90,6 +93,7 @@ write_default_group() {
         echo "- { name: '$AUTO_SELF_NODE', type: fallback, hidden: true, url: '$HEALTH_CHECK_URL', interval: 300, proxies: [$auto_self_items] }"
         echo "- { name: '$NO_RES_NODE', type: select, hidden: true, proxies: ['$SELF_GROUP'] }"
         echo "- { name: '$SELF_GROUP', type: select, proxies: [$self_items] }"
+        echo "- { name: '$JP_RULE_GROUP', type: select, hidden: true, proxies: [$jp_items] }"
         # 自动住宅出口只放最终住宅/ISP 节点，避免自动兜底到非住宅 IP。
         [ -n "$final_items" ] && echo "- { name: '$AUTO_RES_NODE', type: fallback, hidden: true, url: '$HEALTH_CHECK_URL', interval: 300, proxies: [$final_items] }"
         cat <<EOF
@@ -101,8 +105,9 @@ EOF
 }
 
 write_default_rules() {
-    local direct_domains proxy_domains direct_keywords proxy_keywords
+    local direct_domains proxy_domains direct_keywords proxy_keywords jp_domains
     direct_domains=$(extract_domains direct-domains DIRECT)
+    jp_domains=$(extract_domains jp-domains "$JP_RULE_GROUP")
     proxy_domains=$(extract_domains proxy-domains "$RES_GROUP")
     [ -n "$proxy_domains" ] || proxy_domains=$(extract_domains proxy-domains "美国静态住宅IP")
     direct_keywords=$(extract_keywords direct-keywords DIRECT)
@@ -117,6 +122,14 @@ write_default_rules() {
         echo "# shellcrash-manager:direct-keywords-begin"
         emit_keyword_rules "$direct_keywords" DIRECT
         echo "# shellcrash-manager:direct-keywords-end"
+        echo "# shellcrash-manager:jp-domains-begin"
+        emit_domain_rules "$jp_domains" "$JP_RULE_GROUP"
+        echo "# shellcrash-manager:jp-domains-end"
+        echo "# shellcrash-manager:jp-keywords-begin"
+        emit_keyword_rules "bycsi
+bybit
+bytick" "$JP_RULE_GROUP"
+        echo "# shellcrash-manager:jp-keywords-end"
         echo "# shellcrash-manager:proxy-domains-begin"
         emit_domain_rules "$proxy_domains" "$RES_GROUP"
         echo "# shellcrash-manager:proxy-domains-end"
@@ -153,6 +166,7 @@ SELF_GROUP="自建节点"
 DIRECT_EXIT_NODE="直接使用静态住宅IP"
 AUTO_RES_NODE="自动住宅出口"
 AUTO_SELF_NODE="自动前置链路"
+JP_RULE_GROUP="日本专用节点"
 CONFIG_FILE="$TMPDIR/config.yaml"
 
 [ -s "$CONFIG_FILE" ] || return 0
@@ -168,7 +182,8 @@ awk \
     -v self="$SELF_GROUP" \
     -v direct_exit="$DIRECT_EXIT_NODE" \
     -v auto_res="$AUTO_RES_NODE" \
-    -v auto_self="$AUTO_SELF_NODE" '
+    -v auto_self="$AUTO_SELF_NODE" \
+    -v jp_group="$JP_RULE_GROUP" '
     function trim(s) {
         sub(/^[[:space:]]+/, "", s)
         sub(/[[:space:]]+$/, "", s)
@@ -184,7 +199,7 @@ awk \
         return t == "DIRECT" || t == "REJECT" || t == "REJECT-DROP" || t == "REJECT-TINYGIF" || t == "REJECT-DICT" || t == "REJECT-ARRAY" || t == "PASS" || t == "GLOBAL" || t == "COMPATIBLE"
     }
     function is_manager_group(t) {
-        return t == res || t == no_self || t == no_res || t == self || t == direct_exit || t == auto_res || t == auto_self || t == "美国静态住宅IP"
+        return t == res || t == no_self || t == no_res || t == self || t == direct_exit || t == auto_res || t == auto_self || t == jp_group || t == "美国静态住宅IP"
     }
     function is_direct_group(t, first, seen, depth) {
         seen = SUBSEP t SUBSEP
@@ -423,7 +438,8 @@ fi
 
 # 如果配置了客户端订阅发布，运行时配置每次生成后都会自动同步到公网服务器。
 PUBLISH_SCRIPT="/data/other_vol/shellcrash-manager/scripts/client_subscription_publish.sh"
-[ -x "$PUBLISH_SCRIPT" ] && ( "$PUBLISH_SCRIPT" "$CONFIG_FILE" >/dev/null 2>&1 & )
+PUBLISH_CONFIG="$TMPDIR/client-subscription-config.yaml"
+[ -x "$PUBLISH_SCRIPT" ] && cp "$CONFIG_FILE" "$PUBLISH_CONFIG" 2>/dev/null && ( "$PUBLISH_SCRIPT" "$PUBLISH_CONFIG" >/data/other_vol/shellcrash-manager/last-client-subscription.log 2>&1 & )
 EOF
     chmod 755 "$WRAPPER_DST"
 
