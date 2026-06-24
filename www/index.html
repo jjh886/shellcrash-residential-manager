@@ -227,6 +227,7 @@
             <option value="http">HTTP</option>
             <option value="vless">VLESS Reality</option>
             <option value="vless-ws-tls">VLESS WS TLS</option>
+            <option value="hysteria2">Hysteria2</option>
           </select>
         </div>
         <div>
@@ -242,7 +243,7 @@
           <input id="nodeUsername" autocomplete="off" placeholder="Socks5/HTTP 可填">
         </div>
         <div>
-          <label for="nodePassword">密码（Socks5/HTTP/SS）</label>
+          <label for="nodePassword">密码（Socks5/HTTP/SS/Hysteria2）</label>
           <input id="nodePassword" type="password" autocomplete="off" placeholder="编辑时留空保留旧密码">
         </div>
         <div>
@@ -254,12 +255,12 @@
           <input id="nodeUuid" autocomplete="off" placeholder="VLESS Reality 使用">
         </div>
         <div>
-          <label for="nodeSni">SNI / 域名（VLESS）</label>
+          <label for="nodeSni">SNI / 域名（VLESS/Hysteria2）</label>
           <input id="nodeSni" placeholder="例如 www.example.com">
         </div>
         <div>
-          <label for="nodeFlow">Flow / WS 路径（VLESS）</label>
-          <input id="nodeFlow" value="xtls-rprx-vision" placeholder="Reality 填 flow，WS TLS 填 /assets/xxxx">
+          <label for="nodeFlow">Flow / WS 路径 / 跳跃端口</label>
+          <input id="nodeFlow" value="xtls-rprx-vision" placeholder="Reality 填 flow，WS TLS 填路径，Hysteria2 可填端口范围">
         </div>
         <div>
           <label for="nodePublicKey">Reality 公钥（Reality）</label>

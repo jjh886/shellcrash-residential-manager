@@ -56,7 +56,7 @@ save_node() {
     [ -n "$id" ] || id="$(date +%s)"
     [ "$enabled" = "OFF" ] || enabled=ON
     [ "$use_residential" = "ON" ] || use_residential=OFF
-    case "$proto" in shadowsocks|ss|socks5|http|vless|vless-ws-tls) ;; *) fail "协议只能选择 Shadowsocks、Socks5、HTTP、VLESS Reality 或 VLESS WS TLS。" ;; esac
+    case "$proto" in shadowsocks|ss|socks5|http|vless|vless-ws-tls|hysteria2) ;; *) fail "协议只能选择 Shadowsocks、Socks5、HTTP、VLESS Reality、VLESS WS TLS 或 Hysteria2。" ;; esac
     [ -n "$name" ] || fail "节点名称不能为空。"
     [ -n "$server" ] || fail "服务器地址不能为空。"
     valid_port_value "$port" || fail "端口必须是 1-65535。"
@@ -69,6 +69,7 @@ save_node() {
         [ -n "$cipher" ] || cipher=aes-128-gcm
         [ -n "$password" ] || fail "Shadowsocks 节点必须填写密码。"
     fi
+    [ "$proto" = "hysteria2" ] && [ -n "$password" ] && [ -n "$sni" ] || [ "$proto" != "hysteria2" ] || fail "Hysteria2 节点必须填写密码和 SNI。"
     case "$proto" in
         vless|vless-ws-tls) [ -n "$uuid" ] || fail "VLESS 节点必须填写 UUID。" ;;
     esac

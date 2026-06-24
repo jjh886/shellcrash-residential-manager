@@ -30,6 +30,7 @@ tar -czf "$OUT" \
   --exclude 'shellcrash-residential-manager/leak-guard.conf.bak.*' \
   --exclude 'shellcrash-residential-manager/scripts/install-reality-node.sh' \
   --exclude 'shellcrash-residential-manager/scripts/install-static-node.sh' \
+  --exclude 'shellcrash-residential-manager/scripts/install-hysteria2-node.sh' \
   --exclude 'shellcrash-residential-manager/*.tar.gz' \
   shellcrash-residential-manager
 

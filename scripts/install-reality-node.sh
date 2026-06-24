@@ -208,7 +208,7 @@ packet_encoding=xudp
 upstream=$upstream
 
 mihomo:
-- { name: '$name_q', type: vless, server: '$server_q', port: $NODE_PORT, uuid: '$uuid_q', network: tcp, tls: true, udp: true, packet-encoding: xudp, flow: 'xtls-rprx-vision', servername: '$sni_q', client-fingerprint: chrome, reality-opts: { public-key: '$public_q', short-id: '$short_q' } }
+- { name: '$name_q', type: vless, server: '$server_q', port: $NODE_PORT, uuid: '$uuid_q', network: tcp, tls: true, udp: true, packet-encoding: xudp, flow: 'xtls-rprx-vision', servername: '$sni_q', client-fingerprint: ios, reality-opts: { public-key: '$public_q', short-id: '$short_q' } }
 EOF
     chmod 600 "$INFO_FILE"
 }

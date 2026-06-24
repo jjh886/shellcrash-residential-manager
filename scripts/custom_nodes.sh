@@ -73,9 +73,9 @@ emit_custom_nodes_yaml() {
         public_key=$(yaml_quote "$public_key")
         short_id=$(yaml_quote "$short_id")
         dialer=""
-        # 勾选“这个节点就是最终出口 IP”后，节点会放进最终出口分组；
-        # 给它加 dialer-proxy 后，就能用“自建节点”分组选择直连、订阅中转或自建中转。
-        [ "$use_residential" = "ON" ] && dialer=", dialer-proxy: '自建节点'"
+        # 勾选“这个节点就是最终出口 IP”后，默认允许它接在前置链路后面。
+        # Hysteria2 作为 UDP 最终出口时更适合直连，避免再被 TCP 前置链路影响稳定性。
+        [ "$use_residential" = "ON" ] && [ "$proto" != "hysteria2" ] && dialer=", dialer-proxy: '自建节点'"
 
         case "$proto" in
             shadowsocks|ss)
@@ -91,7 +91,8 @@ emit_custom_nodes_yaml() {
             vless)
                 [ -n "$sni" ] || sni="$server"
                 [ -n "$flow" ] || flow=xtls-rprx-vision
-                line="- { name: '$name', type: vless, server: '$server', port: $port, uuid: '$uuid', network: tcp, tls: true, udp: true, packet-encoding: xudp, flow: '$flow', servername: '$sni', client-fingerprint: chrome"
+                # 订阅里的稳定 Reality 节点多数使用 iOS 指纹；这里只影响客户端握手特征。
+                line="- { name: '$name', type: vless, server: '$server', port: $port, uuid: '$uuid', network: tcp, tls: true, udp: true, packet-encoding: xudp, flow: '$flow', servername: '$sni', client-fingerprint: ios"
                 [ -n "$public_key" ] && {
                     line="$line, reality-opts: { public-key: '$public_key'"
                     [ -n "$short_id" ] && line="$line, short-id: '$short_id'"
@@ -103,6 +104,11 @@ emit_custom_nodes_yaml() {
                 [ -n "$sni" ] || sni="$server"
                 [ -n "$flow" ] || flow="/assets/ws"
                 echo "- { name: '$name', type: vless, server: '$server', port: $port, uuid: '$uuid', network: ws, tls: true, udp: true, packet-encoding: xudp, servername: '$sni', client-fingerprint: chrome, ws-opts: { path: '$flow', headers: { Host: '$sni' } }$dialer }"
+                ;;
+            hysteria2)
+                line="- { name: '$name', type: hysteria2, server: '$server', port: $port, udp: true, password: '$password', sni: '$sni', skip-cert-verify: true"
+                [ -n "$flow" ] && line="$line, ports: '$flow', mport: '$flow'"
+                echo "$line$dialer }"
                 ;;
         esac
     done < "$CUSTOM_NODES_FILE"
